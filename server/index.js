@@ -260,6 +260,11 @@ function initializeWhatsApp() {
                 await msg.reply('❌ *Entendido.* Cita cancelada.');
                 io.emit('log', `❌ ${sessions[match].nombre} ha CANCELADO su cita.`);
                 updated = true;
+            } else if (body === '3') {
+                sessions[match].status = 'Reagendar';
+                await msg.reply('🕒 *Entendido.* Un/a Funcionario/a se pondrá en contacto con usted a la brevedad para coordinar su nueva hora. Si lo prefiere, puede llamar al *75 256 5688* o realice una solicitud por https://telesalud.gob.cl/');
+                io.emit('log', `🕒 ${sessions[match].nombre} ha solicitado REAGENDAR su cita.`);
+                updated = true;
             }
 
             if (updated) {

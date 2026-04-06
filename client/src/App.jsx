@@ -82,7 +82,7 @@ const AppContent = () => {
     }
   });
 
-  const [messageTemplate, setMessageTemplate] = useState('👋 *Hola {{Nombre}}*\n🏥 El *Hospital de Curepto* le recuerda su próxima cita:\n📆 *{{DiaSemana}} {{FechaDisplay}}*  ⏰ *{{HoraCita}}*\n📄 *Motivo:* {{Motivo}}\n\n--------------------------\n🙏 *POR FAVOR RESPONDA:*\n✅ Marque **1** para *CONFIRMAR*\n❌ Marque **2** para *CANCELAR*\n--------------------------\n\n📞 Consultas: *75 256 5688*\n🌐 *¿No puede asistir? Reagende aquí:* https://telesalud.gob.cl/\n⏳ Llegue con *20 minutos de anticipación*\n\n💙 ¡Muchas gracias por su atención!');
+  const [messageTemplate, setMessageTemplate] = useState('👋 *Hola {{Nombre}}*\n🏥 El *Hospital de Curepto* le recuerda su próxima cita:\n📆 *{{DiaSemana}} {{FechaDisplay}}*  ⏰ *{{HoraCita}}*\n📄 *Motivo:* {{Motivo}}\n\n--------------------------\n🙏 *POR FAVOR RESPONDA:*\n✅ Marque **1** para *CONFIRMAR*\n❌ Marque **2** para *CANCELAR*\n⏳ Marque **3** para *REAGENDAR*\n--------------------------\n\n📞 Consultas: *75 256 5688*\n🌐 *¿No puede asistir? Reagende aquí:* https://telesalud.gob.cl/\n⏳ Llegue con *20 minutos de anticipación*\n\n💙 ¡Muchas gracias por su atención!');
   const [isSending, setIsSending] = useState(false);
   const [delay, setDelay] = useState(3000);
 
@@ -503,6 +503,7 @@ const AppContent = () => {
                             <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
                               session.status === 'Confirmada' ? 'bg-emerald-100 text-emerald-700' : 
                               session.status === 'Cancelada' ? 'bg-red-100 text-red-700' : 
+                              session.status === 'Reagendar' ? 'bg-amber-100 text-amber-700' :
                               session.status === 'Reenviado' ? 'bg-indigo-100 text-indigo-700' :
                               'bg-blue-100 text-blue-700'
                             }`}>
