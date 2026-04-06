@@ -29,7 +29,8 @@ import {
   Trash2,
   AlertCircle,
   Power,
-  ShieldCheck
+  ShieldCheck,
+  RotateCcw
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
@@ -246,6 +247,20 @@ const AppContent = () => {
     }
   };
 
+  const handleResendIndividual = async (id) => {
+    if (!id || !ready || !currentUser) return;
+    try {
+      const token = await currentUser.getIdToken();
+      await axios.post(`${API_URL}/resend-individual`, { id }, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      alert('Reenvío solicitado con éxito.');
+    } catch (error) {
+      console.error('Error resending individual:', error);
+      alert(error.response?.data || 'Error al reenviar mensaje.');
+    }
+  };
+
   const handleSendMessages = async () => {
     if (!excelData || excelData.length === 0 || !currentUser) return;
     setIsSending(true);
@@ -458,20 +473,61 @@ const AppContent = () => {
                  <button onClick={clearSessions} className="text-[10px] font-bold text-red-500 border p-2 rounded-lg">Purger Radar</button>
                </div>
                <div className="overflow-x-auto rounded-2xl border border-slate-100">
-                 <table className="w-full text-left text-xs">
+                 <table className="w-full text-left text-[10px]">
                     <thead className="bg-slate-50 text-slate-500 font-bold uppercase">
-                      <tr><th className="px-4 py-3">Paciente</th><th className="px-4 py-3">Teléfono</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3">Hora</th><th className="px-4 py-3"></th></tr>
+                      <tr>
+                        <th className="px-4 py-3">Paciente</th>
+                        <th className="px-4 py-3">Teléfono</th>
+                        <th className="px-4 py-3">Cita</th>
+                        <th className="px-4 py-3">Agenda</th>
+                        <th className="px-4 py-3">Profesional</th>
+                        <th className="px-4 py-3">Estado</th>
+                        <th className="px-4 py-3 text-right">Acciones</th>
+                      </tr>
                     </thead>
                     <tbody className="divide-y">
                       {Object.entries(sessions).map(([id, session]) => (
-                        <tr key={id}>
-                          <td className="px-4 py-3 font-bold">{session.Nombre || session.nombre}</td>
-                          <td className="px-4 py-3 text-slate-500">{id}</td>
+                        <tr key={id} className="hover:bg-slate-50 transition-colors">
                           <td className="px-4 py-3">
-                            <span className={`px-2 py-0.5 rounded-full font-bold ${session.status === 'Confirmada' ? 'bg-emerald-100 text-emerald-700' : session.status === 'Cancelada' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>{session.status}</span>
+                            <div className="font-bold text-slate-900">{session.Nombre || session.nombre}</div>
+                            <div className="text-[9px] text-slate-400">Actualizado: {session.lastUpdated ? new Date(session.lastUpdated).toLocaleTimeString() : '--'}</div>
                           </td>
-                          <td className="px-4 py-3 text-slate-400">{session.lastUpdated ? new Date(session.lastUpdated).toLocaleTimeString() : '--'}</td>
-                          <td className="px-4 py-3 text-right"><button onClick={() => deleteIndividualSession(id)} className="text-red-300 hover:text-red-500"><Trash2 size={14}/></button></td>
+                          <td className="px-4 py-3 text-slate-500 font-mono">{id}</td>
+                          <td className="px-4 py-3">
+                            <div className="font-semibold text-indigo-600">{session.fecha || '--'}</div>
+                            <div className="text-slate-400">{session.hora || '--'}</div>
+                          </td>
+                          <td className="px-4 py-3 max-w-[150px] truncate" title={session.motivo}>{session.motivo || 'Sin motivo'}</td>
+                          <td className="px-4 py-3 leading-tight">{session.profesional || 'No asignado'}</td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                              session.status === 'Confirmada' ? 'bg-emerald-100 text-emerald-700' : 
+                              session.status === 'Cancelada' ? 'bg-red-100 text-red-700' : 
+                              session.status === 'Reenviado' ? 'bg-indigo-100 text-indigo-700' :
+                              'bg-blue-100 text-blue-700'
+                            }`}>
+                              {session.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex justify-end gap-2">
+                              <button 
+                                onClick={() => handleResendIndividual(id)} 
+                                disabled={!ready}
+                                className="p-1.5 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                                title="Reenviar mensaje"
+                              >
+                                <RotateCcw size={14}/>
+                              </button>
+                              <button 
+                                onClick={() => deleteIndividualSession(id)} 
+                                className="p-1.5 text-red-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                                title="Eliminar de monitor"
+                              >
+                                <Trash2 size={14}/>
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

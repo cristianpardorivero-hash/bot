@@ -714,9 +714,11 @@ app.post('/send-messages', async (req, res) => {
                     nombre: getValue(['nombre', 'paciente']) || 'Paciente',
                     telefonoOriginal: row[actualPhoneColumn] || phone,
                     whatsapp_id: phone,
-                    motivo: getValue(['motivo', 'prestación', 'prestacion']) || 'Sin motivo',
+                    motivo: getValue(['motivo', 'prestación', 'prestacion', 'agenda']) || 'Sin motivo',
                     fecha: getValue(['fecha', 'día', 'dia']) || '',
                     hora: getValue(['hora']) || '',
+                    profesional: getValue(['profesional', 'médico', 'medico', 'especialista']) || 'No asignado',
+                    originalMessage: message, // Guardamos el mensaje para poder reenviarlo idéntico
                     status: 'Enviado',
                     lastUpdated: new Date().toISOString()
                 };
@@ -807,6 +809,34 @@ app.post('/send-manual', authenticate, async (req, res) => {
     } catch (error) {
         console.error('Error en envío manual:', error.message);
         res.status(500).send(`Error: ${error.message}`);
+    }
+});
+
+// NUEVO: Endpoint para reenviar un mensaje individual desde el monitor
+app.post('/resend-individual', authenticate, async (req, res) => {
+    try {
+        const { id } = req.body;
+        if (!id || !sessions[id]) return res.status(404).send('Sesión no encontrada.');
+        if (!clientReady) return res.status(503).send('WhatsApp no está listo.');
+
+        const session = sessions[id];
+        const target = session.whatsapp_id || id; // Priorizar el ID serializado si existe
+
+        io.emit('log', `🔄 Reenviando mensaje a ${session.nombre} (${id})...`);
+        
+        await client.sendMessage(target, session.originalMessage);
+        
+        session.status = 'Reenviado';
+        session.lastUpdated = new Date().toISOString();
+        saveSessions();
+
+        io.emit('log', `✅ Reenvío exitoso a ${session.nombre}`);
+        io.emit('status_update', { id, status: 'Reenviado', data: session });
+        
+        res.send('Mensaje reenviado correctamente.');
+    } catch (error) {
+        console.error('Error en reenvío individual:', error.message);
+        res.status(500).send(`Error al reenviar: ${error.message}`);
     }
 });
 
