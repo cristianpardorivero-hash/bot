@@ -132,6 +132,23 @@ function saveSessions() {
 
 loadSessions();
 
+// NUEVO: Ayudante para registro histórico en Firestore (Imborrable)
+async function logMessageToFirestore(data) {
+    try {
+        const { paciente, telefono, mensaje, responsable, tipo } = data;
+        await admin.firestore().collection('historial_envios').add({
+            paciente,
+            telefono,
+            mensaje,
+            responsable: responsable || 'Sistema',
+            tipo, // 'masivo', 'manual', 'reenvio'
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+    } catch (e) {
+        console.error("❌ Error guardando en historial Firestore:", e.message);
+    }
+}
+
 function initializeWhatsApp() {
     // Detección mejorada para Railway/Linux y Windows
     const chromePaths = [
@@ -600,7 +617,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     }
 });
 
-app.post('/send-messages', async (req, res) => {
+app.post('/send-messages', authenticate, async (req, res) => {
     try {
         const { data, phoneColumn, messageTemplate, delay = 2000 } = req.body;
 
@@ -737,6 +754,15 @@ app.post('/send-messages', async (req, res) => {
                 });
                 io.emit('status_update', { id: sessionKey, status: 'Enviado', data: sessions[sessionKey] });
 
+                // Registro histórico en Firestore
+                logMessageToFirestore({
+                    paciente: sessions[sessionKey].nombre,
+                    telefono: sessionKey,
+                    mensaje: message,
+                    responsable: req.user.email,
+                    tipo: 'masivo'
+                });
+
             } catch (error) {
                 const errorMsg = `❌ Error enviando a ${phone}: ${error.message}`;
                 console.error(errorMsg);
@@ -800,6 +826,16 @@ app.post('/send-manual', authenticate, async (req, res) => {
 
             await client.sendMessage(numberId._serialized, message);
             io.emit('log', `✅ Envío manual exitoso a ${phone}`);
+
+            // Registro histórico en Firestore
+            logMessageToFirestore({
+                paciente: 'Envío Manual',
+                telefono: phone,
+                mensaje: message,
+                responsable: req.user.email,
+                tipo: 'manual'
+            });
+
             res.send('Mensaje manual enviado.');
         } catch (pupError) {
             console.error('❌ Puppeteer Error en envío:', pupError.message);
@@ -834,6 +870,15 @@ app.post('/resend-individual', authenticate, async (req, res) => {
         session.status = 'Reenviado';
         session.lastUpdated = new Date().toISOString();
         saveSessions();
+
+        // Registro histórico en Firestore
+        logMessageToFirestore({
+            paciente: session.nombre,
+            telefono: id,
+            mensaje: session.originalMessage,
+            responsable: req.user.email,
+            tipo: 'reenvio'
+        });
 
         io.emit('log', `✅ Reenvío exitoso a ${session.nombre}`);
         io.emit('status_update', { id, status: 'Reenviado', data: session });
