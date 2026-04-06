@@ -350,7 +350,7 @@ const AppContent = () => {
           </div>
         </header>
 
-        {activeView === 'dashboard' ? (
+        {activeView === 'dashboard' && (
           <>
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-slate-200">
@@ -547,8 +547,20 @@ const AppContent = () => {
                </div>
             </section>
           </>
-        ) : (
-          <AdminPanel />
+        )}
+
+        {activeView === 'admin' && <AdminPanel />}
+
+        {activeView === 'solicitudes' && (
+          <div className="space-y-6">
+            <button 
+              onClick={() => setActiveView('dashboard')}
+              className="px-4 py-2 bg-white text-slate-600 rounded-2xl border border-slate-200 hover:bg-slate-50 transition-all font-semibold flex items-center gap-2 w-fit mb-6 shadow-sm"
+            >
+              <RotateCcw size={16} /> Volver al Dashboard
+            </button>
+            <SolicitudesPanel />
+          </div>
         )}
       </div>
 

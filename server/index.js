@@ -186,8 +186,7 @@ function initializeWhatsApp() {
                 '--no-first-run',
                 '--no-zygote',
                 '--disable-gpu',
-                '--disable-software-rasterizer',
-                '--single-process'
+                '--disable-software-rasterizer'
             ]
         }
     });
@@ -393,10 +392,10 @@ function initializeWhatsApp() {
     
     const initTimeout = setTimeout(() => {
         if (!clientReady) {
-            console.log("⚠️ La inicialización de WhatsApp está tardando... (60s reach)");
+            console.log("⚠️ La inicialización de WhatsApp está tardando... (120s reach)");
             io.emit('whatsapp_status', { state: 'TIMEOUT', message: 'La conexión está tardando más de lo habitual. Verifica tu internet.' });
         }
-    }, 60000);
+    }, 120000);
 
     console.log('--- Intentando inicializar WhatsApp Client... ---');
     client.initialize().catch(err => {
@@ -1126,6 +1125,18 @@ app.post('/whatsapp/reset', authenticate, async (req, res) => {
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
+});
+
+process.on('SIGINT', async () => {
+    console.log('--- Cerrando servidor y cliente de WhatsApp... ---');
+    if (client) await client.destroy();
+    process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+    console.log('--- Cerrando servidor y cliente de WhatsApp... ---');
+    if (client) await client.destroy();
+    process.exit(0);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
