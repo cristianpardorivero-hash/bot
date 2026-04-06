@@ -240,7 +240,8 @@ function initializeWhatsApp() {
     });
 
     client.on('message_create', async (msg) => {
-        if (msg.fromMe && !msg.body.match(/^[12]$/)) return; 
+        // Ignorar mis propios mensajes salientes largos (solo escuchar mis respuestas cortas 1,2,3 para debug)
+        if (msg.fromMe && msg.body.length > 5) return; 
 
         const fromRaw = msg.from; 
         const numberOnly = fromRaw.replace(/\D/g, ''); 
@@ -253,31 +254,43 @@ function initializeWhatsApp() {
             type: msg.type
         });
         if (incomingLogs.length > 50) incomingLogs.shift();
+        
+        // NORMALIZACIÓN AGRESIVA: Extraer solo los números (ej: "3️⃣" -> "3", "3 reagendar" -> "3")
+        let cleanBody = body.replace(/\D/g, '');
+        if (cleanBody.length > 1) cleanBody = cleanBody.substring(0, 1);
 
-        if (body !== '1' && body !== '2') return;
+        if (cleanBody !== '1' && cleanBody !== '2' && cleanBody !== '3') return;
 
-        console.log(`📩 Actividad detectada de ${fromRaw}: "${body}"`);
+        console.log(`📩 Actividad detectada de ${fromRaw}: "${cleanBody}"`);
+        io.emit('log', `📩 Bot escuchó: "${cleanBody}" de ${numberOnly}`);
+        io.emit('log', `🔍 Paso 1: Normalizado a "${cleanBody}". Buscando paciente...`);
 
         const match = Object.keys(sessions).find(id => {
             const cleanId = id.replace(/\D/g, '');
-            return cleanId.endsWith(numberOnly.slice(-8)) || numberOnly.endsWith(cleanId.slice(-8));
+            // Coincidencia por últimos 8 dígitos (más robusto para variaciones de +569 / 9 / 56)
+            return cleanId.slice(-8) === numberOnly.slice(-8);
         });
 
+        if (!match) {
+            io.emit('log', `❌ No se encontró una cita activa (Radar) para el número terminando en ${numberOnly.slice(-4)}.`);
+        }
+
         if (match) {
+            io.emit('log', `✅ Paso 2: Coincidencia con "${sessions[match].nombre}". Procesando respuesta ${cleanBody}...`);
             console.log(`¡Coincidencia total con paciente: ${sessions[match].nombre}!`);
             let updated = false;
 
-            if (body === '1') {
+            if (cleanBody === '1') {
                 sessions[match].status = 'Confirmada';
                 await msg.reply('✅ *Gracias!* Su cita ha sido confirmada.');
                 io.emit('log', `✅ ${sessions[match].nombre} ha CONFIRMADO su cita.`);
                 updated = true;
-            } else if (body === '2') {
+            } else if (cleanBody === '2') {
                 sessions[match].status = 'Cancelada';
                 await msg.reply('❌ *Entendido.* Cita cancelada.');
                 io.emit('log', `❌ ${sessions[match].nombre} ha CANCELADO su cita.`);
                 updated = true;
-            } else if (body === '3') {
+            } else if (cleanBody === '3') {
                 sessions[match].status = 'Reagendar';
                 await msg.reply('🕒 *Entendido.* Un/a Funcionario/a se pondrá en contacto con usted a la brevedad para coordinar su nueva hora. Si lo prefiere, puede llamar al *75 256 5688* o realice una solicitud por https://telesalud.gob.cl/');
                 io.emit('log', `🕒 ${sessions[match].nombre} ha solicitado REAGENDAR su cita.`);
@@ -976,6 +989,58 @@ app.post('/admin/update-user', authenticate, async (req, res) => {
     } catch (error) {
         console.error('Error actualizando usuario administrativo:', error);
         res.status(500).send(`Error al actualizar usuario: ${error.message}`);
+    }
+});
+
+// NUEVO: Reinicio completo de WhatsApp (Borra sesión y pide nuevo QR)
+app.post('/whatsapp/reset', authenticate, async (req, res) => {
+    try {
+        // Verificar ADMIN
+        const callerUid = req.user.uid;
+        let callerDoc = await admin.firestore().collection('usuarios').doc(callerUid).get();
+        if (!callerDoc.exists) callerDoc = await admin.firestore().collection('usuarios').doc(req.user.email).get();
+
+        if (!callerDoc.exists || callerDoc.data().role !== 'ADMIN') {
+            return res.status(403).send('No autorizado.');
+        }
+
+        console.log("♻️ Reinicio total solicitado...");
+        io.emit('log', "♻️ Iniciando reinicio del motor de WhatsApp...");
+        
+        clientReady = false;
+        io.emit('ready', false);
+
+        if (client) {
+            try {
+                await client.destroy();
+                console.log("✅ Cliente destruido.");
+            } catch (e) {
+                console.error("⚠️ Error destruyendo cliente:", e.message);
+            }
+        }
+
+        // Borrar carpeta de sesión para forzar nuevo QR
+        const authPath = path.resolve(__dirname, '.wwebjs_auth');
+        if (fs.existsSync(authPath)) {
+            try {
+                fs.rmSync(authPath, { recursive: true, force: true });
+                console.log("🗑️ Carpeta de sesión eliminada.");
+            } catch (e) {
+                console.error("❌ Error borrando carpeta de sesión:", e.message);
+            }
+        }
+
+        res.json({ success: true, message: "Reinicio en progreso..." });
+
+        // Dar un pequeño tiempo para que los archivos se liberen y re-inicializar
+        setTimeout(() => {
+            console.log("🚀 Re-inicializando WhatsApp...");
+            initializeWhatsApp();
+        }, 3000);
+
+    } catch (error) {
+        console.error('Error en reset:', error);
+        res.status(500).send('Error interno en el reinicio.');
     }
 });
 
