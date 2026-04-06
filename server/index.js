@@ -68,9 +68,22 @@ const authenticate = async (req, res, next) => {
 
 const app = express();
 app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : "*",
+    origin: (origin, callback) => {
+        const whiteList = [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "https://botsome.up.railway.app",
+            "https://bot-production-d6f9.up.railway.app"
+        ];
+        if (!origin || whiteList.indexOf(origin) !== -1 || process.env.ALLOWED_ORIGINS) {
+            callback(null, true);
+        } else {
+            callback(new Error('No permitido por CORS'));
+        }
+    },
     methods: ["GET", "POST", "DELETE", "OPTIONS"],
-    credentials: true
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization"]
 }));
 app.use(express.json());
 
@@ -78,6 +91,8 @@ const server = http.createServer(app);
 const ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://botsome.up.railway.app",
+    "https://bot-production-d6f9.up.railway.app",
     `http://${require('os').hostname()}:5173`
 ];
 
