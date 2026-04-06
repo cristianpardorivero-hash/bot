@@ -401,6 +401,7 @@ function initializeWhatsApp() {
                     await msg.reply(`✅ *Muchas gracias.* Su solicitud para ${profesional} ha sido recibida y está siendo procesada.\n\nUn funcionario se pondrá en contacto con usted a la brevedad para confirmar la fecha y hora final. ¡Que tenga un buen día!`);
                     
                     io.emit('log', `🌸 Nueva solicitud de ${phone} para ${profesional} (Pendiente en Dashboard).`);
+                    io.emit('nueva_solicitud', { phone, profesional, tipo });
                     
                     // Finalizar flujo
                     delete conversacionesActivas[phone];
