@@ -133,20 +133,27 @@ function saveSessions() {
 loadSessions();
 
 function initializeWhatsApp() {
-    // Intentar detectar la ruta de Chrome dinámicamente o usar rutas comunes
+    // Detección mejorada para Railway/Linux y Windows
     const chromePaths = [
+        process.env.CHROME_PATH,
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium-browser',
         'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-        process.env.CHROME_PATH 
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
     ];
     
     let executablePath = chromePaths.find(p => p && fs.existsSync(p));
 
     client = new Client({
         authStrategy: new LocalAuth(),
+        webVersionCache: {
+            type: 'remote',
+            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+        },
         puppeteer: {
             headless: 'new',
             executablePath: executablePath || undefined,
+            protocolTimeout: 120000, // Aumentar tiempo de espera del protocolo (2 minutos)
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -155,7 +162,9 @@ function initializeWhatsApp() {
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                '--disable-gpu'
+                '--disable-gpu',
+                '--disable-software-rasterizer',
+                '--single-process'
             ]
         }
     });
