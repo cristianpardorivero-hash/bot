@@ -15,14 +15,26 @@ const admin = require('firebase-admin');
 let serviceAccount;
 try {
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    let rawConfig = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
+    // Eliminar comillas externas si el usuario pegó el JSON entre comillas
+    if (rawConfig.startsWith("'") && rawConfig.endsWith("'")) rawConfig = rawConfig.slice(1, -1);
+    if (rawConfig.startsWith('"') && rawConfig.endsWith('"')) rawConfig = rawConfig.slice(1, -1);
     
-    // IMPORTANTE: Corregir el formato de la clave privada PEM que suele dañarse en variables de entorno
+    serviceAccount = JSON.parse(rawConfig);
+    
+    // Normalización ROBUSTA de la clave privada PEM
     if (serviceAccount.private_key && typeof serviceAccount.private_key === 'string') {
+      // 1. Reemplazar saltos de línea literales \n por caracteres reales
       serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+      
+      // 2. Asegurar que empiece y termine con los encabezados correctos
+      if (!serviceAccount.private_key.includes('-----BEGIN PRIVATE KEY-----')) {
+        console.warn("⚠️ Advertencia: La clave privada no parece tener el encabezado PEM estándar.");
+      }
     }
     
-    console.log("✅ Usando Firebase Config desde variable de entorno.");
+    console.log("✅ Configuración de Firebase cargada (Longitud de clave:", serviceAccount.private_key?.length, ")");
+    console.log("🔍 Inicio de clave:", serviceAccount.private_key?.substring(0, 40).replace(/\n/g, '[NL]'), "...");
   } else {
     serviceAccount = require("./serviceAccountKey.json");
     console.log("✅ Usando Firebase Config desde archivo local.");
