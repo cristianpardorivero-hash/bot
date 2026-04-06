@@ -50,6 +50,7 @@ const AppContent = () => {
   const [sessions, setSessions] = useState({});
   const [viewingSession, setViewingSession] = useState(null);
   const [whatsappStatus, setWhatsappStatus] = useState({ state: 'INITIALIZING', message: 'Iniciando WhatsApp Web...' });
+  const [isCameliaActive, setIsCameliaActive] = useState(true);
   
   // States for manual sending
   const [manualPhone, setManualPhone] = useState('');
@@ -168,6 +169,10 @@ const AppContent = () => {
       }));
     });
 
+    socket.on('camelia_status', (active) => {
+      setIsCameliaActive(active);
+    });
+
     return () => {
       socket.off('connect');
       socket.off('qr');
@@ -178,6 +183,7 @@ const AppContent = () => {
       socket.off('initial_sessions');
       socket.off('status_update');
       socket.off('whatsapp_status');
+      socket.off('camelia_status');
     };
   }, [socket]);
 
@@ -246,6 +252,10 @@ const AppContent = () => {
       console.error('Error reset WhatsApp:', error);
       alert('Error al solicitar el reinicio. Verifica tu rol de Administrador.');
     }
+  };
+
+  const handleToggleCamelia = () => {
+    socket.emit('toggle_camelia', !isCameliaActive);
   };
 
   const handleResendIndividual = async (id) => {
@@ -324,6 +334,22 @@ const AppContent = () => {
               <span className={`rounded-full px-4 py-2 text-sm font-semibold border ${ready ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                 ● {ready ? 'Conexión Estable' : 'Desconectado'}
               </span>
+
+              {userProfile?.role === 'ADMIN' && (
+                <button 
+                  onClick={handleToggleCamelia}
+                  className={`rounded-2xl border px-4 py-2 text-sm font-semibold shadow-sm transition flex items-center gap-2 ${
+                    isCameliaActive 
+                      ? 'bg-emerald-600/10 text-emerald-700 border-emerald-200 hover:bg-emerald-600/20' 
+                      : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                  }`}
+                  title={isCameliaActive ? "Pausar Camelia" : "Activar Camelia"}
+                >
+                  <div className={`h-2 w-2 rounded-full ${isCameliaActive ? 'bg-emerald-500' : 'bg-slate-400'}`}></div>
+                  Bot Camelia: <strong>{isCameliaActive ? 'ACTIVA' : 'PAUSADA'}</strong>
+                </button>
+              )}
+
               {userProfile?.role === 'ADMIN' && (
                 <div className="flex gap-2">
                   <button 

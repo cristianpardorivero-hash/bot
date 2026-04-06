@@ -121,7 +121,9 @@ let currentQr = null;
 const SESSIONS_FILE = path.resolve(__dirname, 'sessions.json');
 const CAMELIA_FILE = path.resolve(__dirname, 'camelia_sessions.json');
 let sessions = {};
-let conversacionesActivas = {}; // Estados de chat para Camelia
+let conversacionesActivas = { 
+    _config: { activa: true } // Configuración persistente de Camelia
+};
 let incomingLogs = []; // CAJA NEGRA: Para ver mensajes reales en /debug
 
 function loadSessions() {
@@ -133,8 +135,13 @@ function loadSessions() {
         }
         if (fs.existsSync(CAMELIA_FILE)) {
             const cameliaData = fs.readFileSync(CAMELIA_FILE, 'utf8');
-            conversacionesActivas = JSON.parse(cameliaData);
-            console.log(`🌸 Camelia: ${Object.keys(conversacionesActivas).length} conversaciones recuperadas.`);
+            const parsedCamelia = JSON.parse(cameliaData);
+            // Asegurar que _config siempre exista
+            conversacionesActivas = { 
+                _config: { activa: true }, 
+                ...parsedCamelia 
+            };
+            console.log(`🌸 Camelia: ${Object.keys(conversacionesActivas).length - 1} conversaciones. Estado: ${conversacionesActivas._config.activa ? 'ACTIVA' : 'INACTIVA'}`);
         }
     } catch (e) {
         console.error("❌ Error cargando sesiones:", e.message);
@@ -328,8 +335,15 @@ function initializeWhatsApp() {
             }
         } else {
             // --- LOGICA DE CAMELIA ---
-            // Si no hay campaña activa para este número, Camelia toma el control
-            await handleCameliaFlow(msg, numberOnly);
+            // Solo procesamos si Camelia está ACTIVA o si el usuario ya tiene una charla iniciada
+            const estaActiva = conversacionesActivas._config?.activa !== false;
+            const tieneCharlaActiva = conversacionesActivas[numberOnly];
+
+            if (estaActiva || tieneCharlaActiva) {
+                await handleCameliaFlow(msg, numberOnly);
+            } else {
+                console.log(`⏸️ Camelia está en silencio para ${numberOnly}`);
+            }
         }
     });
 
@@ -443,6 +457,16 @@ io.on('connection', (socket) => {
     }
     // Send current sessions on connect
     socket.emit('initial_sessions', sessions);
+    socket.emit('camelia_status', conversacionesActivas._config?.activa !== false);
+
+    // Toggle para Camelia
+    socket.on('toggle_camelia', (newState) => {
+        if (!conversacionesActivas._config) conversacionesActivas._config = {};
+        conversacionesActivas._config.activa = newState;
+        saveSessions();
+        io.emit('camelia_status', newState);
+        io.emit('log', `🌸 Camelia ha sido ${newState ? 'ACTIVADA' : 'DESACTIVADA (Silencio)'} por un administrador.`);
+    });
 
     // Permite al frontend solicitar el estado si sufre una carrera (race condition) al recargar la página
     socket.on('request_status', () => {
