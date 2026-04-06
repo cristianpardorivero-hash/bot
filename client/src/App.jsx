@@ -35,6 +35,7 @@ import {
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
 import AdminPanel from './components/AdminPanel';
+import SolicitudesPanel from './components/SolicitudesPanel';
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -324,13 +325,23 @@ const AppContent = () => {
                 ● {ready ? 'Conexión Estable' : 'Desconectado'}
               </span>
               {userProfile?.role === 'ADMIN' && (
-                <button 
-                  onClick={() => setActiveView(activeView === 'dashboard' ? 'admin' : 'dashboard')}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold shadow-sm transition hover:bg-slate-100 flex items-center gap-2"
-                >
-                  {activeView === 'dashboard' ? <Settings size={16} /> : <Layout size={16} />}
-                  {activeView === 'dashboard' ? 'Panel Admin' : 'Volver'}
-                </button>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => setActiveView(activeView === 'solicitudes' ? 'dashboard' : 'solicitudes')}
+                    className={`rounded-2xl border px-4 py-2 text-sm font-semibold shadow-sm transition flex items-center gap-2 ${
+                      activeView === 'solicitudes' ? 'bg-emerald-600 text-white border-emerald-700' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <MessageSquare size={16} /> Solicitudes Camelia
+                  </button>
+                  <button 
+                    onClick={() => setActiveView(activeView === 'dashboard' ? 'admin' : 'dashboard')}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold shadow-sm transition hover:bg-slate-100 flex items-center gap-2"
+                  >
+                    {activeView === 'dashboard' ? <Settings size={16} /> : <Layout size={16} />}
+                    {activeView === 'dashboard' ? 'Panel Admin' : 'Volver'}
+                  </button>
+                </div>
               )}
               <button onClick={handleLogout} className="rounded-2xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm flex items-center gap-2">
                 <LogIn size={16} /> Salir

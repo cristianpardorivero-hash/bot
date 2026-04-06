@@ -104,7 +104,9 @@ let currentQr = null;
 
 // Peristent sessions management (Using absolute path for reliability)
 const SESSIONS_FILE = path.resolve(__dirname, 'sessions.json');
+const CAMELIA_FILE = path.resolve(__dirname, 'camelia_sessions.json');
 let sessions = {};
+let conversacionesActivas = {}; // Estados de chat para Camelia
 let incomingLogs = []; // CAJA NEGRA: Para ver mensajes reales en /debug
 
 function loadSessions() {
@@ -112,19 +114,22 @@ function loadSessions() {
         if (fs.existsSync(SESSIONS_FILE)) {
             const data = fs.readFileSync(SESSIONS_FILE, 'utf8');
             sessions = JSON.parse(data);
-            console.log(`✅ Base de datos cargada: ${Object.keys(sessions).length} registros encontrados.`);
-        } else {
-            console.log("ℹ️ No se encontró archivo de sesiones previo, iniciando limpio.");
+            console.log(`✅ Base de datos (Campañas) cargada: ${Object.keys(sessions).length} registros.`);
+        }
+        if (fs.existsSync(CAMELIA_FILE)) {
+            const cameliaData = fs.readFileSync(CAMELIA_FILE, 'utf8');
+            conversacionesActivas = JSON.parse(cameliaData);
+            console.log(`🌸 Camelia: ${Object.keys(conversacionesActivas).length} conversaciones recuperadas.`);
         }
     } catch (e) {
         console.error("❌ Error cargando sesiones:", e.message);
-        sessions = {};
     }
 }
 
 function saveSessions() {
     try {
         fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2), 'utf8');
+        fs.writeFileSync(CAMELIA_FILE, JSON.stringify(conversacionesActivas, null, 2), 'utf8');
     } catch (e) {
         console.error("❌ Error guardando sesiones:", e.message);
     }
@@ -307,8 +312,82 @@ function initializeWhatsApp() {
                     message: `Respuesta procesada: ${sessions[match].status} (${sessions[match].nombre})`
                 });
             }
+        } else {
+            // --- LOGICA DE CAMELIA ---
+            // Si no hay campaña activa para este número, Camelia toma el control
+            await handleCameliaFlow(msg, numberOnly);
         }
     });
+
+    // Función principal para el flujo conversacional de Camelia
+    async function handleCameliaFlow(msg, phone) {
+        const estado = conversacionesActivas[phone] || { step: 'INICIO' };
+        const body = msg.body.trim();
+
+        try {
+            switch(estado.step) {
+                case 'INICIO':
+                    conversacionesActivas[phone] = { step: 'MENU_PRINCIPAL' };
+                    await msg.reply('🌸 *Hola, soy Camelia*, su asistente virtual del Hospital de Curepto.\n\n¿En qué puedo ayudarle hoy?\n\n*1.* Solicitar una hora médica.\n*2.* Cambiar o reagendar una hora existente.\n*3.* Consultar horarios.');
+                    saveSessions();
+                    break;
+
+                case 'MENU_PRINCIPAL':
+                    if (body === '1' || body === '2') {
+                        conversacionesActivas[phone] = { 
+                            step: 'ESPERANDO_PROFESIONAL', 
+                            tipo: body === '1' ? 'Solicitud' : 'Cambio' 
+                        };
+                        await msg.reply('Entendido. Por favor, escriba el nombre o la especialidad del *Profesional* con quien desea atenderse.');
+                    } else if (body === '3') {
+                        await msg.reply('Nuestro horario de atención general es de lunes a viernes, de 08:00 a 17:00 horas. Para consultas específicas, puede llamar al 75 256 5688.');
+                        // Mantenemos el paso o reseteamos
+                    } else {
+                        await msg.reply('Por favor, seleccione una opción válida (1, 2 o 3).');
+                    }
+                    saveSessions();
+                    break;
+
+                case 'ESPERANDO_PROFESIONAL':
+                    conversacionesActivas[phone].profesional = body;
+                    conversacionesActivas[phone].step = 'ESPERANDO_MOTIVO';
+                    await msg.reply(`Perfecto. Ahora, indique brevemente el *Motivo* de su consulta para el profesional ${body}.`);
+                    saveSessions();
+                    break;
+
+                case 'ESPERANDO_MOTIVO':
+                    const motivo = body;
+                    const tipo = conversacionesActivas[phone].tipo;
+                    const profesional = conversacionesActivas[phone].profesional;
+
+                    // GUARDAR EN FIRESTORE
+                    await admin.firestore().collection('solicitudes_camelia').add({
+                        paciente_telefono: phone,
+                        tipo: tipo,
+                        profesional: profesional,
+                        motivo: motivo,
+                        estado: 'PENDIENTE',
+                        fecha: admin.firestore.FieldValue.serverTimestamp()
+                    });
+
+                    await msg.reply(`✅ *Muchas gracias.* Su solicitud para ${profesional} ha sido recibida y está siendo procesada.\n\nUn funcionario se pondrá en contacto con usted a la brevedad para confirmar la fecha y hora final. ¡Que tenga un buen día!`);
+                    
+                    io.emit('log', `🌸 Nueva solicitud de ${phone} para ${profesional} (Pendiente en Dashboard).`);
+                    
+                    // Finalizar flujo
+                    delete conversacionesActivas[phone];
+                    saveSessions();
+                    break;
+
+                default:
+                    delete conversacionesActivas[phone];
+                    saveSessions();
+                    break;
+            }
+        } catch (error) {
+            console.error("❌ Error en flujo Camelia:", error.message);
+        }
+    }
 
     io.emit('whatsapp_status', { state: 'INITIALIZING', message: 'Iniciando motor de WhatsApp...' });
     
