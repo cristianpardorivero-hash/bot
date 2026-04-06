@@ -891,6 +891,39 @@ app.post('/admin/create-user', authenticate, async (req, res) => {
     }
 });
 
+// NUEVO: Endpoint para que el Admin actualice usuarios
+app.post('/admin/update-user', authenticate, async (req, res) => {
+    try {
+        // 1. Verificar que el solicitante sea ADMIN
+        const callerUid = req.user.uid;
+        let callerDoc = await admin.firestore().collection('usuarios').doc(callerUid).get();
+        if (!callerDoc.exists) {
+            callerDoc = await admin.firestore().collection('usuarios').doc(req.user.email).get();
+        }
+
+        if (!callerDoc.exists || callerDoc.data().role !== 'ADMIN') {
+            return res.status(403).send('Acceso denegado: Se requieren permisos de Administrador.');
+        }
+
+        const { id, nombre, role } = req.body;
+        if (!id || !nombre || !role) {
+            return res.status(400).send('Faltan datos obligatorios (id, nombre, role).');
+        }
+
+        // 2. Actualizar el perfil en Firestore
+        await admin.firestore().collection('usuarios').doc(id).update({
+            nombre,
+            role,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        res.json({ success: true, message: `Usuario ${nombre} actualizado correctamente.` });
+    } catch (error) {
+        console.error('Error actualizando usuario administrativo:', error);
+        res.status(500).send(`Error al actualizar usuario: ${error.message}`);
+    }
+});
+
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { db } from "../firebase";
 import { collection, getDocs, doc, setDoc, deleteDoc } from "firebase/firestore";
-import { Users, UserPlus, Trash2, ShieldCheck, Mail, RefreshCw, QrCode } from "lucide-react";
+import { Users, UserPlus, Trash2, ShieldCheck, Mail, RefreshCw, QrCode, Edit2, X } from "lucide-react";
 import axios from "axios";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
@@ -11,6 +11,7 @@ const AdminPanel = () => {
   const { userProfile } = useAuth();
   const [users, setUsers] = useState([]);
   const [newUser, setNewUser] = useState({ email: "", role: "USER", nombre: "", password: "" }); // password añadido
+  const [editingUser, setEditingUser] = useState(null);
   const [loading, setLoading] = useState(false);
 
   // Solo cargar si es ADMIN
@@ -46,6 +47,28 @@ const AdminPanel = () => {
     } catch (err) {
       console.error(err);
       alert(err.response?.data || "Error al crear el usuario.");
+    }
+    setLoading(false);
+  };
+
+  const handleUpdateUser = async (e) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    setLoading(true);
+    try {
+      const { auth } = await import("../firebase");
+      const token = await auth.currentUser.getIdToken();
+
+      const response = await axios.post(`${API_URL}/admin/update-user`, editingUser, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      alert(response.data.message || "Usuario actualizado.");
+      fetchUsers();
+      setEditingUser(null);
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data || "Error al actualizar.");
     }
     setLoading(false);
   };
@@ -159,21 +182,86 @@ const AdminPanel = () => {
                       </span>
                    </div>
                 </div>
-                <button 
-                  className="p-2 text-red-200 hover:text-red-500 transition-colors"
-                  onClick={async () => {
-                    if(window.confirm(`¿Eliminar a ${u.nombre}?`)) {
-                      await deleteDoc(doc(db, "usuarios", u.id));
-                      fetchUsers();
-                    }
-                  }}
-                >
-                  <Trash2 size={18} />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button 
+                    className="p-2 text-slate-300 hover:text-indigo-500 transition-colors"
+                    title="Editar Funcionario"
+                    onClick={() => setEditingUser({...u})}
+                  >
+                    <Edit2 size={18} />
+                  </button>
+                  <button 
+                    className="p-2 text-red-200 hover:text-red-500 transition-colors"
+                    title="Eliminar Funcionario"
+                    onClick={async () => {
+                      if(window.confirm(`¿Eliminar a ${u.nombre}?`)) {
+                        await deleteDoc(doc(db, "usuarios", u.id));
+                        fetchUsers();
+                      }
+                    }}
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         </div>
+
+        {/* Modal de Edición */}
+        {editingUser && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                 <h3 className="font-bold text-slate-900 flex items-center gap-2">
+                   <Edit2 size={18} className="text-indigo-500"/> Editar Funcionario
+                 </h3>
+                 <button onClick={() => setEditingUser(null)} className="text-slate-400 hover:text-slate-600">
+                   <X size={20}/>
+                 </button>
+              </div>
+              <form onSubmit={handleUpdateUser} className="p-8 space-y-5">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Nombre Completo</label>
+                  <input 
+                    type="text" 
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={editingUser.nombre}
+                    onChange={e => setEditingUser({...editingUser, nombre: e.target.value})}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Rol en el Sistema</label>
+                  <select 
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 appearance-none"
+                    value={editingUser.role}
+                    onChange={e => setEditingUser({...editingUser, role: e.target.value})}
+                  >
+                    <option value="USER">Funcionario (Sólo Envíos)</option>
+                    <option value="ADMIN">Administrador (Control Total)</option>
+                  </select>
+                </div>
+                <div className="pt-4 flex gap-3">
+                  <button 
+                    type="button" 
+                    onClick={() => setEditingUser(null)}
+                    className="flex-1 px-4 py-3.5 border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit" 
+                    disabled={loading}
+                    className="flex-[2] px-4 py-3.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-200 disabled:bg-slate-300"
+                  >
+                    {loading ? "Guardando..." : "Guardar Cambios"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {/* Sección de Gestión de Conectividad */}
         <div className="bg-red-50 border border-red-100 p-6 rounded-2xl">
