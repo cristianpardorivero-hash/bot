@@ -1,6 +1,6 @@
 FROM node:20-slim
 
-# Instalar dependencias necesarias para Google Chrome y Puppeteer
+# Instalar dependencias necesarias y Google Chrome oficial
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -24,29 +24,25 @@ RUN apt-get update && apt-get install -y \
     libcairo2 \
     libasound2 \
     fonts-liberation \
-    libappindicator3-1 \
-    lsb-release \
-    xdg-utils \
     --no-install-recommends \
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
+    && apt-get update && apt-get install -y google-chrome-stable --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# Crear el directorio de trabajo
 WORKDIR /app
 
-# Copiar archivos de dependencia
+# Copiar archivos de dependencia e instalar
 COPY package*.json ./
-
-# Instalar dependencias
 RUN npm install
 
 # Copiar el resto de la aplicación
 COPY . .
 
-# Variables de entorno por defecto
+# Variables de entorno críticas para estabilidad
 ENV PORT=8080
-# Le decimos a Puppeteer que use el Chrome del sistema si es necesario, 
-# aunque wwebjs suele traer el suyo, estas librerías lo hacen funcionar.
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=false
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
 
 EXPOSE 8080
 

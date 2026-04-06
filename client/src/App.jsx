@@ -221,7 +221,12 @@ const AppContent = () => {
       setManualPhone('');
     } catch (error) {
       console.error('Error manual send:', error);
-      alert(error.response?.data || 'Error al enviar mensaje manual.');
+      const errorMsg = error.response?.data || error.message;
+      if (errorMsg.includes('detached Frame') || error.response?.status === 503) {
+        alert('⌛ El canal de WhatsApp se está sincronizando. Por favor, espera 10 segundos e intenta de nuevo.');
+      } else {
+        alert(errorMsg);
+      }
     } finally {
       setIsManualSending(false);
     }

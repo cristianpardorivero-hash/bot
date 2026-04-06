@@ -135,6 +135,7 @@ loadSessions();
 function initializeWhatsApp() {
     // Detección mejorada para Railway/Linux y Windows
     const chromePaths = [
+        process.env.PUPPETEER_EXECUTABLE_PATH, 
         process.env.CHROME_PATH,
         '/usr/bin/google-chrome',
         '/usr/bin/chromium-browser',
@@ -153,7 +154,7 @@ function initializeWhatsApp() {
         puppeteer: {
             headless: 'new',
             executablePath: executablePath || undefined,
-            protocolTimeout: 120000, // Aumentar tiempo de espera del protocolo (2 minutos)
+            protocolTimeout: 120000, 
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -167,6 +168,11 @@ function initializeWhatsApp() {
                 '--single-process'
             ]
         }
+    });
+
+    // Detectar si el navegador o la página se cierran solos
+    client.on('change_state', (state) => {
+        console.log("🔄 WhatsApp changed state:", state);
     });
 
     client.on('qr', (qr) => {
@@ -745,8 +751,19 @@ app.post('/send-messages', async (req, res) => {
         io.emit('finished', true);
     } catch (criticalError) {
         console.error('🔥 ERROR CRITICO EN /send-messages:', criticalError);
-        io.emit('whatsapp_status', { state: 'ERROR', message: 'Falla crítica del servidor al enviar.' });
-        io.emit('finished', true); // Release frontend lock
+        const isDetached = criticalError.message.includes('detached Frame');
+        const userMsg = isDetached ? 'El navegador se desconectó inesperadamente. Reiniciando...' : `Error crítico: ${criticalError.message}`;
+        
+        io.emit('whatsapp_status', { state: 'ERROR', message: userMsg });
+        io.emit('log', `❌ ${userMsg}`);
+        io.emit('finished', true); 
+
+        if (isDetached) {
+            console.log("🔄 Detached Frame detectado, activando auto-reinicio...");
+            clientReady = false;
+            io.emit('ready', false);
+            // Intentamos reinicio suave o pedimos al usuario usar el botón de reiniciar
+        }
     }
 });
 
@@ -762,18 +779,27 @@ app.post('/send-manual', authenticate, async (req, res) => {
         let phone = rawPhone.trim().replace(/\D/g, '');
         if (phone.length === 9 && phone.startsWith('9')) phone = '56' + phone;
 
-        io.emit('log', `📤 Enviando manual a: ${phone}...`);
-        
-        const numberId = await client.getNumberId(phone);
-        if (!numberId) {
-            const errorMsg = `❌ Número manual ${phone} no registrado en WhatsApp.`;
-            io.emit('log', errorMsg);
-            return res.status(404).send(errorMsg);
-        }
+        try {
+            const numberId = await client.getNumberId(phone);
+            if (!numberId) {
+                const errorMsg = `❌ Número manual ${phone} no registrado en WhatsApp.`;
+                io.emit('log', errorMsg);
+                return res.status(404).send(errorMsg);
+            }
 
-        await client.sendMessage(numberId._serialized, message);
-        io.emit('log', `✅ Envío manual exitoso a ${phone}`);
-        res.send('Mensaje manual enviado.');
+            await client.sendMessage(numberId._serialized, message);
+            io.emit('log', `✅ Envío manual exitoso a ${phone}`);
+            res.send('Mensaje manual enviado.');
+        } catch (pupError) {
+            console.error('❌ Puppeteer Error en envío:', pupError.message);
+            if (pupError.message.includes('detached Frame') || pupError.message.includes('Session closed')) {
+                clientReady = false;
+                io.emit('ready', false);
+                io.emit('whatsapp_status', { state: 'DISCONNECTED', message: 'Detectado fallo del canal. Re-conectando...' });
+                return res.status(503).send('El canal de WhatsApp se reinició. Por favor intenta en 5 segundos.');
+            }
+            throw pupError; 
+        }
     } catch (error) {
         console.error('Error en envío manual:', error.message);
         res.status(500).send(`Error: ${error.message}`);
