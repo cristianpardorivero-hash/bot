@@ -10,7 +10,7 @@ const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostna
 const AdminPanel = () => {
   const { userProfile } = useAuth();
   const [users, setUsers] = useState([]);
-  const [newUser, setNewUser] = useState({ email: "", role: "USER", nombre: "" });
+  const [newUser, setNewUser] = useState({ email: "", role: "USER", nombre: "", password: "" }); // password añadido
   const [loading, setLoading] = useState(false);
 
   // Solo cargar si es ADMIN
@@ -27,21 +27,25 @@ const AdminPanel = () => {
 
   const handleAddUser = async (e) => {
     e.preventDefault();
+    if (!newUser.password || newUser.password.length < 6) {
+      alert("La contraseña debe tener al menos 6 caracteres.");
+      return;
+    }
     setLoading(true);
     try {
-      // Nota: En una app real, aquí llamaríamos a una Cloud Function o al Backend 
-      // para crear el usuario en Firebase Auth primero.
-      // Por ahora pre-registramos el perfil en Firestore.
-      await setDoc(doc(db, "usuarios", newUser.email), {
-        nombre: newUser.nombre,
-        role: newUser.role,
-        email: newUser.email
+      const { auth } = await import("../firebase");
+      const token = await auth.currentUser.getIdToken();
+
+      const response = await axios.post(`${API_URL}/admin/create-user`, newUser, {
+        headers: { Authorization: `Bearer ${token}` }
       });
+
+      alert(response.data.message || "Usuario creado con éxito.");
       fetchUsers();
-      setNewUser({ email: "", role: "USER", nombre: "" });
-      alert("Usuario pre-registrado. Deberá crear su cuenta con este correo.");
+      setNewUser({ email: "", role: "USER", nombre: "", password: "" });
     } catch (err) {
       console.error(err);
+      alert(err.response?.data || "Error al crear el usuario.");
     }
     setLoading(false);
   };
@@ -102,6 +106,15 @@ const AdminPanel = () => {
               className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all text-sm"
               value={newUser.email}
               onChange={e => setNewUser({...newUser, email: e.target.value})}
+              required 
+            />
+            <input 
+              type="password" 
+              placeholder="Contraseña Inicial (mínimo 6 chars)" 
+              className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all text-sm"
+              value={newUser.password}
+              onChange={e => setNewUser({...newUser, password: e.target.value})}
+              minLength={6}
               required 
             />
             <select 

@@ -840,6 +840,52 @@ app.post('/resend-individual', authenticate, async (req, res) => {
     }
 });
 
+// NUEVO: Endpoint para que el Admin cree usuarios con contraseña
+app.post('/admin/create-user', authenticate, async (req, res) => {
+    try {
+        // 1. Verificar que el solicitante sea ADMIN
+        const callerUid = req.user.uid;
+        // Buscamos por UID o por Email (por la inconsistencia detectada)
+        let callerDoc = await admin.firestore().collection('usuarios').doc(callerUid).get();
+        if (!callerDoc.exists) {
+            callerDoc = await admin.firestore().collection('usuarios').doc(req.user.email).get();
+        }
+
+        if (!callerDoc.exists || callerDoc.data().role !== 'ADMIN') {
+            return res.status(403).send('Acceso denegado: Se requieren permisos de Administrador.');
+        }
+
+        const { email, password, nombre, role } = req.body;
+        if (!email || !password || !nombre) {
+            return res.status(400).send('Faltan datos obligatorios (email, password, nombre).');
+        }
+
+        // 2. Crear usuario en Firebase Authentication
+        const userRecord = await admin.auth().createUser({
+            email,
+            password,
+            displayName: nombre
+        });
+
+        // 3. Crear el perfil en Firestore (usando el UID oficial)
+        await admin.firestore().collection('usuarios').doc(userRecord.uid).set({
+            nombre,
+            email,
+            role: role || 'USER',
+            createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        res.status(201).json({ 
+            success: true, 
+            message: `Usuario ${nombre} creado correctamente.`,
+            uid: userRecord.uid 
+        });
+    } catch (error) {
+        console.error('Error creando usuario administrativo:', error);
+        res.status(500).send(`Error al crear usuario: ${error.message}`);
+    }
+});
+
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
