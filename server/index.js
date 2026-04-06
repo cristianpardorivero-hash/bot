@@ -595,162 +595,179 @@ app.post('/send-messages', async (req, res) => {
 
         res.send('Processing started');
         io.emit('log', `🚀 Iniciando envío a ${data.length} pacientes...`);
+        io.emit('progress', { index: -1, total: data.length });
 
         for (let i = 0; i < data.length; i++) {
             const row = data[i];
             console.log(`\n🔍 --- PROCESANDO REGISTRO ${i+1} ---`);
-            console.log(`Columnas detectadas en este registro: ${Object.keys(row).join(', ')}`);
-        
-        // Priorizar la columna 'Celular' que genera nuestro nuevo parser
-        const actualPhoneColumn = row['Celular'] ? 'Celular' : (row[phoneColumn] ? phoneColumn : null);
-        console.log(`Columna de destino: ${actualPhoneColumn || 'NINGUNA'}`);
-        
-        if (!actualPhoneColumn) {
-            console.warn(`⚠️ Saltando registro ${i}: No se encontró columna de teléfono válida.`);
-            continue;
-        }
-
-        let phone = String(row[actualPhoneColumn]).trim().replace(/\D/g, '');
-        console.log(`Número extraído (crudo): ${phone}`);
-        
-        // Skip if phone is empty or too short
-        if (phone.length < 7 || phone.length > 15) {
-            console.warn(`⚠️ Saltando número inválido por longitud: ${phone}`);
-            continue;
-        }
-
-        // Specific logic for Chilean numbers
-        if (phone.length === 9 && phone.startsWith('9')) {
-            phone = '56' + phone;
-            console.log(`Prefijo 56 añadido: ${phone}`);
-        }
-
-        // Validate if the number is on WhatsApp
-        try {
-            console.log(`Consultando registro WhatsApp para: ${phone}...`);
-            const numberId = await client.getNumberId(phone);
             
-            if (!numberId) {
-                console.warn(`❌ El número ${phone} NO está registrado en WhatsApp.`);
+            const actualPhoneColumn = row['Celular'] ? 'Celular' : (row[phoneColumn] ? phoneColumn : null);
+            
+            if (!actualPhoneColumn) {
+                const errorMsg = `⚠️ Saltando registro ${i+1}: No se encontró columna de teléfono válida.`;
+                console.warn(errorMsg);
+                io.emit('log', errorMsg);
+                io.emit('progress', { index: i, total: data.length, status: 'failed', error: 'Sin columna de teléfono' });
+                continue;
+            }
+
+            let phone = String(row[actualPhoneColumn]).trim().replace(/\D/g, '');
+            
+            if (phone.length < 7 || phone.length > 15) {
+                const errorMsg = `⚠️ Saltando número inválido (${phone}) por longitud.`;
+                console.warn(errorMsg);
+                io.emit('log', errorMsg);
+                io.emit('progress', { index: i, total: data.length, status: 'failed', error: 'Longitud inválida' });
+                continue;
+            }
+
+            if (phone.length === 9 && phone.startsWith('9')) {
+                phone = '56' + phone;
+            }
+
+            try {
+                io.emit('log', `🔍 Verificando WhatsApp para: ${phone}...`);
+                const numberId = await client.getNumberId(phone).catch(e => {
+                    console.error("Timeout/Error en getNumberId:", e.message);
+                    return null;
+                });
+                
+                if (!numberId) {
+                    const errorMsg = `❌ El número ${phone} NO está registrado en WhatsApp.`;
+                    console.warn(errorMsg);
+                    io.emit('log', errorMsg);
+                    io.emit('progress', {
+                        index: i,
+                        total: data.length,
+                        status: 'failed',
+                        phone: phone,
+                        error: 'El número no está registrado en WhatsApp.'
+                    });
+                    continue;
+                }
+                phone = numberId._serialized;
+            } catch (err) {
+                console.error(`🔴 Error fatal verificando número ${phone}:`, err.message);
+                continue;
+            }
+
+            let message = messageTemplate.replace(/{{([^}]+)}}/g, (match, tag) => {
+                const cleanTag = tag.trim().toLowerCase();
+                const exactKeys = {
+                    'nombre': 'Nombre',
+                    'fechadisplay': 'FechaDisplay',
+                    'horacita': 'HoraCita',
+                    'diasemana': 'DiaSemana',
+                    'motivo': 'Motivo'
+                };
+                const targetKey = exactKeys[cleanTag];
+                if (targetKey && row[targetKey] !== undefined && row[targetKey] !== null) {
+                    return String(row[targetKey]);
+                }
+                const searchKeys = [];
+                if (cleanTag.includes('nombre')) searchKeys.push('nombre', 'paciente');
+                if (cleanTag.includes('fecha')) searchKeys.push('fecha');
+                if (cleanTag.includes('dia')) searchKeys.push('día', 'dia');
+                if (cleanTag.includes('hora')) searchKeys.push('hora', 'cita', 'h.');
+                if (cleanTag.includes('motivo')) searchKeys.push('motivo', 'prestación');
+                if (searchKeys.length === 0) searchKeys.push(cleanTag);
+                const fuzzyKey = Object.keys(row).find(k => {
+                    const kLow = k.trim().toLowerCase();
+                    return searchKeys.some(s => kLow.includes(s));
+                });
+                if (fuzzyKey !== undefined) {
+                    return (row[fuzzyKey] !== undefined && row[fuzzyKey] !== null) ? String(row[fuzzyKey]) : '';
+                }
+                return match;
+            });
+
+            try {
+                io.emit('log', `📤 Enviando a ${phone}...`);
+                await client.sendMessage(phone, message);
+                console.log(`✅ Mensaje enviado a: ${phone}`);
+                io.emit('log', `✅ Mensaje enviado exitosamente a ${phone}`);
+                
+                const getValue = (keys) => {
+                    const foundKey = Object.keys(row).find(k => 
+                        keys.some(search => k.trim().toLowerCase().includes(search.toLowerCase()))
+                    );
+                    return foundKey ? row[foundKey] : '';
+                };
+
+                const sessionKey = String(row[actualPhoneColumn]).replace(/\D/g, ''); 
+                sessions[sessionKey] = {
+                    nombre: getValue(['nombre', 'paciente']) || 'Paciente',
+                    telefonoOriginal: row[actualPhoneColumn] || phone,
+                    whatsapp_id: phone,
+                    motivo: getValue(['motivo', 'prestación', 'prestacion']) || 'Sin motivo',
+                    fecha: getValue(['fecha', 'día', 'dia']) || '',
+                    hora: getValue(['hora']) || '',
+                    status: 'Enviado',
+                    lastUpdated: new Date().toISOString()
+                };
+                saveSessions();
+
+                io.emit('progress', {
+                    index: i,
+                    total: data.length,
+                    status: 'success',
+                    phone: sessionKey
+                });
+                io.emit('status_update', { id: sessionKey, status: 'Enviado', data: sessions[sessionKey] });
+
+            } catch (error) {
+                const errorMsg = `❌ Error enviando a ${phone}: ${error.message}`;
+                console.error(errorMsg);
+                io.emit('log', errorMsg);
                 io.emit('progress', {
                     index: i,
                     total: data.length,
                     status: 'failed',
                     phone: phone,
-                    error: 'El número no está registrado en WhatsApp.'
+                    error: error.message
                 });
-                continue;
-            }
-            phone = numberId._serialized;
-            console.log(`ID de WhatsApp verificado: ${phone}`);
-        } catch (err) {
-            console.error(`🔴 Error fatal verificando número ${phone}:`, err.message);
-            continue;
-        }
-
-        // Use a robust fuzzy matcher for tags
-        let message = messageTemplate.replace(/{{([^}]+)}}/g, (match, tag) => {
-            const cleanTag = tag.trim().toLowerCase();
-            
-            // BÚSQUEDA EXACTA: Priorizar las llaves exactas generadas por nuestro parser interno
-            const exactKeys = {
-                'nombre': 'Nombre',
-                'fechadisplay': 'FechaDisplay',
-                'horacita': 'HoraCita',
-                'diasemana': 'DiaSemana',
-                'motivo': 'Motivo'
-            };
-
-            const targetKey = exactKeys[cleanTag];
-            if (targetKey && row[targetKey] !== undefined && row[targetKey] !== null) {
-                return String(row[targetKey]);
             }
 
-            // Fallback difuso si la plantilla usa algo raro
-            const searchKeys = [];
-            if (cleanTag.includes('nombre')) searchKeys.push('nombre', 'paciente');
-            if (cleanTag.includes('fecha')) searchKeys.push('fecha');
-            if (cleanTag.includes('dia')) searchKeys.push('día', 'dia');
-            if (cleanTag.includes('hora')) searchKeys.push('hora', 'cita', 'h.');
-            if (cleanTag.includes('motivo')) searchKeys.push('motivo', 'prestación');
-            if (searchKeys.length === 0) searchKeys.push(cleanTag);
-
-            const fuzzyKey = Object.keys(row).find(k => {
-                const kLow = k.trim().toLowerCase();
-                return searchKeys.some(s => kLow.includes(s));
-            });
-
-            if (fuzzyKey !== undefined) {
-                return (row[fuzzyKey] !== undefined && row[fuzzyKey] !== null) ? String(row[fuzzyKey]) : '';
+            // Delay between messages
+            if (i < data.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, delay));
             }
-            return match;
-        });
-
-        // Debug: Log the first few messages to see if placeholders are replaced
-        if (i < 3) {
-            console.log(`--- Message Preview (Record ${i+1}) ---`);
-            console.log(`Phone: ${phone}`);
-            console.log(`Keys available: ${Object.keys(row).map(k => '"' + k + '"').join(', ')}`);
-            console.log(`Message:\n${message}\n------------------------`);
         }
-
-        try {
-            await client.sendMessage(phone, message);
-            console.log(`✅ Mensaje enviado a: ${phone}`);
-            io.emit('log', `✅ Mensaje enviado exitosamente a ${phone}`);
-            
-            // BUSCADOR ROBUSTO DE VALORES PARA EL DASHBOARD
-            const getValue = (keys) => {
-                const foundKey = Object.keys(row).find(k => 
-                    keys.some(search => k.trim().toLowerCase().includes(search.toLowerCase()))
-                );
-                return foundKey ? row[foundKey] : '';
-            };
-
-            const sessionKey = String(row[actualPhoneColumn]).replace(/\D/g, ''); 
-            
-            sessions[sessionKey] = {
-                nombre: getValue(['nombre', 'paciente']) || 'Paciente',
-                telefonoOriginal: row[actualPhoneColumn] || phone,
-                whatsapp_id: phone,
-                motivo: getValue(['motivo', 'prestación', 'prestacion']) || 'Sin motivo',
-                fecha: getValue(['fecha', 'día', 'dia']) || '',
-                hora: getValue(['hora']) || '',
-                status: 'Enviado',
-                lastUpdated: new Date().toISOString()
-            };
-            saveSessions();
-
-            io.emit('progress', {
-                index: i,
-                total: data.length,
-                status: 'success',
-                phone: sessionKey
-            });
-            // Update dashboard
-            io.emit('status_update', { id: sessionKey, status: 'Enviado', data: sessions[sessionKey] });
-
-        } catch (error) {
-            console.error(`❌ Error enviando a ${phone}:`, error.message);
-            io.emit('progress', {
-                index: i,
-                total: data.length,
-                status: 'failed',
-                phone: row[actualPhoneColumn] || phone,
-                error: error.message
-            });
-            io.emit('log', `❌ Error enviando a ${row[actualPhoneColumn] || phone}: ${error.message}`);
-        }
-
-        // Delay between messages
-        await new Promise(resolve => setTimeout(resolve, delay));
-    }
-
-    io.emit('finished', true);
+        io.emit('finished', true);
     } catch (criticalError) {
         console.error('🔥 ERROR CRITICO EN /send-messages:', criticalError);
         io.emit('whatsapp_status', { state: 'ERROR', message: 'Falla crítica del servidor al enviar.' });
         io.emit('finished', true); // Release frontend lock
+    }
+});
+
+// Endpoint para envío MANUAL (Sin plantilla)
+app.post('/send-manual', authenticate, async (req, res) => {
+    try {
+        const { phone: rawPhone, message } = req.body;
+
+        if (!clientReady) return res.status(400).send('WhatsApp no está listo.');
+        if (!rawPhone || !message) return res.status(400).send('Datos incompletos.');
+
+        // Normalización básica de número chileno
+        let phone = rawPhone.trim().replace(/\D/g, '');
+        if (phone.length === 9 && phone.startsWith('9')) phone = '56' + phone;
+
+        io.emit('log', `📤 Enviando manual a: ${phone}...`);
+        
+        const numberId = await client.getNumberId(phone);
+        if (!numberId) {
+            const errorMsg = `❌ Número manual ${phone} no registrado en WhatsApp.`;
+            io.emit('log', errorMsg);
+            return res.status(404).send(errorMsg);
+        }
+
+        await client.sendMessage(numberId._serialized, message);
+        io.emit('log', `✅ Envío manual exitoso a ${phone}`);
+        res.send('Mensaje manual enviado.');
+    } catch (error) {
+        console.error('Error en envío manual:', error.message);
+        res.status(500).send(`Error: ${error.message}`);
     }
 });
 
