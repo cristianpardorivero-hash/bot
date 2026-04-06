@@ -631,6 +631,8 @@ app.post('/send-messages', authenticate, async (req, res) => {
         }
 
         res.send('Processing started');
+        const responsableEmail = req.user.email; // Captura segura antes del bucle
+        
         io.emit('log', `🚀 Iniciando envío a ${data.length} pacientes...`);
         io.emit('progress', { index: -1, total: data.length });
 
@@ -664,8 +666,16 @@ app.post('/send-messages', authenticate, async (req, res) => {
 
             try {
                 io.emit('log', `🔍 Verificando WhatsApp para: ${phone}...`);
-                const numberId = await client.getNumberId(phone).catch(e => {
-                    console.error("Timeout/Error en getNumberId:", e.message);
+                
+                // Promesa con TIMEOUT para evitar que se cuelgue el bucle
+                const numberIdPromise = client.getNumberId(phone);
+                const timeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 15000)
+                );
+
+                const numberId = await Promise.race([numberIdPromise, timeoutPromise]).catch(e => {
+                    console.error(`⚠️ Error/Timeout en getNumberId para ${phone}:`, e.message);
+                    io.emit('log', `⚠️ Timeout o error verificando ${phone}.`);
                     return null;
                 });
                 
@@ -759,7 +769,7 @@ app.post('/send-messages', authenticate, async (req, res) => {
                     paciente: sessions[sessionKey].nombre,
                     telefono: sessionKey,
                     mensaje: message,
-                    responsable: req.user.email,
+                    responsable: responsableEmail,
                     tipo: 'masivo'
                 });
 
