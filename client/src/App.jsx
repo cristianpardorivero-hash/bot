@@ -28,6 +28,7 @@ import {
   Monitor,
   Trash2,
   AlertCircle,
+  Power,
   ShieldCheck
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -226,6 +227,20 @@ const AppContent = () => {
     }
   };
 
+  const handleResetWhatsApp = async () => {
+    if (!window.confirm('⚠️ ¿Estás seguro de REINICIAR el motor de WhatsApp? Esto cerrará la sesión actual y forzará un nuevo arranque en el servidor.')) return;
+    try {
+      const token = await currentUser.getIdToken();
+      await axios.post(`${API_URL}/whatsapp/reset`, {}, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      alert('Reinicio solicitado. El servidor tardará unos segundos en volver a generar un QR o reconectar.');
+    } catch (error) {
+      console.error('Error reset WhatsApp:', error);
+      alert('Error al solicitar el reinicio. Verifica tu rol de Administrador.');
+    }
+  };
+
   const handleSendMessages = async () => {
     if (!excelData || excelData.length === 0 || !currentUser) return;
     setIsSending(true);
@@ -332,7 +347,27 @@ const AppContent = () => {
                   <div className="grid gap-6 lg:grid-cols-2">
                     <div className="space-y-4">
                       <div className="rounded-[28px] bg-white p-6 shadow-sm ring-1 ring-slate-200">
-                        <h3 className="text-sm font-bold uppercase text-slate-500 mb-6">Vincular Dispositivo</h3>
+                        <div className="flex items-center justify-between gap-4 mb-6">
+                           <h3 className="text-sm font-bold uppercase text-slate-500">Vincular Dispositivo</h3>
+                           <div className="flex gap-2">
+                             <button 
+                                onClick={() => socket.emit('request_status')}
+                                title="Refrescar estado de conexión"
+                                className="p-2 bg-slate-50 hover:bg-slate-100 text-slate-400 rounded-xl transition-all"
+                             >
+                                <RefreshCw size={14} />
+                             </button>
+                             {userProfile?.role === 'ADMIN' && (
+                               <button 
+                                  onClick={handleResetWhatsApp}
+                                  title="Forzar Inicio / Reiniciar Motor"
+                                  className="p-2 bg-red-50 hover:bg-red-100 text-red-400 rounded-xl transition-all flex items-center gap-2 text-[10px] font-bold"
+                               >
+                                  <Power size={14} /> REINICIAR
+                               </button>
+                             )}
+                           </div>
+                        </div>
                         {ready ? (
                           <div className="flex flex-col items-center py-6 bg-emerald-50 rounded-2xl border border-emerald-100">
                             <ShieldCheck className="text-emerald-500 mb-3" size={48} />
