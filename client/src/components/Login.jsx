@@ -120,15 +120,6 @@ const Login = () => {
         </form>
         
         <div className="mt-8 text-center border-t border-slate-100 pt-6">
-          <button 
-            className="text-emerald-600 font-semibold hover:text-emerald-700 transition-colors" 
-            onClick={() => {
-              setIsSignUp(!isSignUp);
-              setError("");
-            }}
-          >
-            {isSignUp ? "¿Ya tienes cuenta? Inicia sesión" : "¿No tienes cuenta? Regístrate aquí"}
-          </button>
           <p className="text-xs text-slate-400 mt-4 tracking-wide uppercase">
             © 2026 Hospital de Curepto - Innovación en Salud
           </p>

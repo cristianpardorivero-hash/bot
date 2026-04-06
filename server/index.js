@@ -775,9 +775,13 @@ app.post('/send-manual', authenticate, async (req, res) => {
         if (!clientReady) return res.status(400).send('WhatsApp no está listo.');
         if (!rawPhone || !message) return res.status(400).send('Datos incompletos.');
 
-        // Normalización básica de número chileno
-        let phone = rawPhone.trim().replace(/\D/g, '');
-        if (phone.length === 9 && phone.startsWith('9')) phone = '56' + phone;
+        // Normalización inteligente de número chileno
+        let phone = String(rawPhone).trim().replace(/\D/g, '');
+        
+        // 8 dígitos (ej: 92150337) -> Añadir 569 (Total: 56992150337)
+        if (phone.length === 8) phone = '569' + phone;
+        // 9 dígitos (ej: 992150337) -> Añadir 56 (Total: 56992150337)
+        else if (phone.length === 9 && phone.startsWith('9')) phone = '56' + phone;
 
         try {
             const numberId = await client.getNumberId(phone);
