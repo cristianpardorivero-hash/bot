@@ -16,6 +16,12 @@ let serviceAccount;
 try {
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    
+    // IMPORTANTE: Corregir el formato de la clave privada PEM que suele dañarse en variables de entorno
+    if (serviceAccount.private_key && typeof serviceAccount.private_key === 'string') {
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+    }
+    
     console.log("✅ Usando Firebase Config desde variable de entorno.");
   } else {
     serviceAccount = require("./serviceAccountKey.json");
