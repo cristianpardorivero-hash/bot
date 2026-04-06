@@ -33,7 +33,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
 import AdminPanel from './components/AdminPanel';
 
-const API_URL = `http://${window.location.hostname}:3001`;
+const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 // socket se moverá dentro de AppContent para mejor control del ciclo de vida
 
 const AppContent = () => {

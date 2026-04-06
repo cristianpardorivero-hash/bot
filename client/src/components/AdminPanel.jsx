@@ -5,7 +5,7 @@ import { collection, getDocs, doc, setDoc, deleteDoc } from "firebase/firestore"
 import { Users, UserPlus, Trash2, ShieldCheck, Mail, RefreshCw, QrCode } from "lucide-react";
 import axios from "axios";
 
-const API_URL = `http://${window.location.hostname}:3001`;
+const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
 const AdminPanel = () => {
   const { userProfile } = useAuth();

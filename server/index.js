@@ -11,16 +11,24 @@ const fs = require('fs');
 
 const admin = require('firebase-admin');
 
-// Inicializar Firebase Admin
-// Debes descargar tu serviceAccountKey.json desde Firestore e incluirlo en la carpeta server
+// Inicialización de Firebase Admin (Soporta archivo local o variable de entorno para Cloud)
+let serviceAccount;
 try {
-    const serviceAccount = require("./serviceAccountKey.json");
-    admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-    });
-    console.log("🔥 Firebase Admin conectado correctamente.");
-} catch (e) {
-    console.warn("⚠️ Advertencia: No se encontró serviceAccountKey.json. La seguridad del servidor estará limitada hasta que lo agregues.");
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    console.log("✅ Usando Firebase Config desde variable de entorno.");
+  } else {
+    serviceAccount = require("./serviceAccountKey.json");
+    console.log("✅ Usando Firebase Config desde archivo local.");
+  }
+
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+  console.log("🔥 Firebase Admin conectado correctamente.");
+} catch (error) {
+  console.error("❌ Error FATAL al inicializar Firebase:", error.message);
+  process.exit(1);
 }
 
 // Middleware de Autenticación
@@ -41,10 +49,13 @@ const authenticate = async (req, res, next) => {
 };
 
 const app = express();
-app.use(cors()); // CORS DEBE ir antes del middleware de autenticación
+app.use(cors({
+    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : "*",
+    methods: ["GET", "POST", "DELETE", "OPTIONS"],
+    credentials: true
+}));
 app.use(express.json());
 
-// Seguridad desactivada en desarrollo local para garantizar compatibilidad con Excel
 const server = http.createServer(app);
 const ALLOWED_ORIGINS = [
     "http://localhost:5173",
@@ -54,13 +65,7 @@ const ALLOWED_ORIGINS = [
 
 const io = new Server(server, {
     cors: {
-        origin: (origin, callback) => {
-            if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-                callback(null, true);
-            } else {
-                callback(null, true); // Permisivo en desarrollo local
-            }
-        },
+        origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ALLOWED_ORIGINS,
         methods: ["GET", "POST"]
     }
 });
@@ -108,7 +113,6 @@ function saveSessions() {
 }
 
 loadSessions();
-// initializeWhatsApp(); // Eliminado llamada duplicada aquí
 
 function initializeWhatsApp() {
     // Intentar detectar la ruta de Chrome dinámicamente o usar rutas comunes
@@ -122,10 +126,6 @@ function initializeWhatsApp() {
 
     client = new Client({
         authStrategy: new LocalAuth(),
-        /* webVersionCache: {
-            type: 'remote',
-            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
-        }, */
         puppeteer: {
             headless: 'new',
             executablePath: executablePath || undefined,
