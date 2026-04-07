@@ -35,7 +35,7 @@ import {
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
 import AdminPanel from './components/AdminPanel';
-import SolicitudesPanel from './components/SolicitudesPanel';
+
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -352,14 +352,7 @@ const AppContent = () => {
 
               {userProfile?.role === 'ADMIN' && (
                 <div className="flex gap-2">
-                  <button 
-                    onClick={() => setActiveView(activeView === 'solicitudes' ? 'dashboard' : 'solicitudes')}
-                    className={`rounded-2xl border px-4 py-2 text-sm font-semibold shadow-sm transition flex items-center gap-2 ${
-                      activeView === 'solicitudes' ? 'bg-emerald-600 text-white border-emerald-700' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <MessageSquare size={16} /> Solicitudes Camelia
-                  </button>
+
                   <button 
                     onClick={() => setActiveView(activeView === 'dashboard' ? 'admin' : 'dashboard')}
                     className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold shadow-sm transition hover:bg-slate-100 flex items-center gap-2"
@@ -577,17 +570,7 @@ const AppContent = () => {
 
         {activeView === 'admin' && <AdminPanel />}
 
-        {activeView === 'solicitudes' && (
-          <div className="space-y-6">
-            <button 
-              onClick={() => setActiveView('dashboard')}
-              className="px-4 py-2 bg-white text-slate-600 rounded-2xl border border-slate-200 hover:bg-slate-50 transition-all font-semibold flex items-center gap-2 w-fit mb-6 shadow-sm"
-            >
-              <RotateCcw size={16} /> Volver al Dashboard
-            </button>
-            <SolicitudesPanel />
-          </div>
-        )}
+
       </div>
 
       {viewingSession && (
