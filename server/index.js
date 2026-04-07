@@ -352,16 +352,55 @@ function initializeWhatsApp() {
         }
     });
 
+    // --- AYUDANTES DE VALIDACIÓN (Lógica del script anterior) ---
+    function validarRUT(rut) {
+        if (!rut) return false;
+        const cleanRut = String(rut).replace(/[^\dkK]/g, '');
+        if (cleanRut.length < 8 || cleanRut.length > 9) return false;
+        
+        let body = cleanRut.slice(0, -1);
+        let dv = cleanRut.slice(-1).toUpperCase();
+        
+        let sum = 0;
+        let mul = 2;
+        for (let i = body.length - 1; i >= 0; i--) {
+            sum += parseInt(body[i]) * mul;
+            mul = mul === 7 ? 2 : mul + 1;
+        }
+        
+        let res = 11 - (sum % 11);
+        let expectedDv = res === 11 ? '0' : res === 10 ? 'K' : String(res);
+        return dv === expectedDv;
+    }
+
+    function validarNombre(nombre) {
+        if (!nombre || nombre.length < 3) return false;
+        if (/\d/.test(nombre)) return false; // No números
+        if (/[^a-zA-ZáéíóúÁÉÍÓÚñÑ\s]/.test(nombre)) return false; // No caracteres raros
+        return true;
+    }
+
+    const PROFESIONALES = {
+        1: "Médico General",
+        2: "Pediatría",
+        3: "Matrona / Salud Sexual",
+        4: "Kinesiólogo / Rehabilitación",
+        5: "Nutricionista",
+        6: "Psicólogo / Salud Mental",
+        7: "Odontología"
+    };
+
     // Función principal para el flujo conversacional de Camelia
     async function handleCameliaFlow(msg, phone) {
         const body = String(msg.body || '').trim();
+        const bodyLower = body.toLowerCase();
 
-        // Comando secreto de reinicio para pruebas
-        if (body.toUpperCase() === 'RESET') {
+        // Comandos Globales de Navegación
+        if (bodyLower === 'reset' || bodyLower === 'salir' || bodyLower === 'cancelar') {
             delete conversacionesActivas[phone];
             saveSessions();
-            await msg.reply('🔄 *Sesión Reiniciada.* Escriba "Hola" para comenzar de nuevo.');
-            io.emit('log', `🔄 Sesión de ${phone} reiniciada por comando RESET.`);
+            await msg.reply('🔄 *Operación cancelada.* Escriba "Hola" cuando desee volver a empezar.');
+            io.emit('log', `🔄 Sesión de ${phone} reiniciada/cancelada.`);
             return;
         }
 
@@ -378,54 +417,126 @@ function initializeWhatsApp() {
 
                 case 'MENU_PRINCIPAL':
                     if (body === '1' || body === '2') {
+                        const tipo = body === '1' ? 'Solicitud' : 'Cambio';
                         conversacionesActivas[phone] = { 
-                            step: 'ESPERANDO_PROFESIONAL', 
-                            tipo: body === '1' ? 'Solicitud' : 'Cambio' 
+                            step: 'ESPERANDO_ESPECIALIDAD', 
+                            tipo 
                         };
-                        await msg.reply('Entendido. Por favor, escriba el nombre o la especialidad del *Profesional* con quien desea atenderse.');
+                        
+                        const menuEsp = Object.entries(PROFESIONALES)
+                            .map(([k, v]) => `${k}. ${v}`)
+                            .join("\n");
+
+                        await msg.reply(`🩺 *${tipo.toUpperCase()} DE HORA*\n\nPor favor, seleccione el área o especialidad:\n\n${menuEsp}\n\n_Escriba el número o "salir"_`);
+                        saveSessions();
                     } else if (body === '3') {
                         await msg.reply('Nuestro horario de atención general es de lunes a viernes, de 08:00 a 17:00 horas. Para consultas específicas, puede llamar al 75 256 5688.');
-                        // Mantenemos el paso o reseteamos
+                        // Mantener estado o resetear? lo dejamos en menu por si quiere otra cosa
                     } else {
                         await msg.reply('Por favor, seleccione una opción válida (1, 2 o 3).');
                     }
+                    break;
+
+                case 'ESPERANDO_ESPECIALIDAD':
+                    if (bodyLower === 'volver') {
+                        conversacionesActivas[phone].step = 'MENU_PRINCIPAL';
+                        await msg.reply('Regresemos al Menú Principal.\n\n*1.* Solicitar una hora médica.\n*2.* Cambiar o reagendar una hora existente.\n*3.* Consultar horarios.');
+                        return;
+                    }
+
+                    const numEsp = parseInt(body);
+                    if (!PROFESIONALES[numEsp]) {
+                        await msg.reply('⚠️ Opción no válida. Elija un número de la lista (1-7) o escriba "salir".');
+                        return;
+                    }
+
+                    conversacionesActivas[phone].especialidad = PROFESIONALES[numEsp];
+                    conversacionesActivas[phone].step = 'ESPERANDO_NOMBRE';
+                    await msg.reply(`📝 Ha seleccionado: *${PROFESIONALES[numEsp]}*.\n\nPara continuar, por favor escriba el *Nombre Completo* del paciente.`);
                     saveSessions();
                     break;
 
-                case 'ESPERANDO_PROFESIONAL':
-                    conversacionesActivas[phone].profesional = body;
+                case 'ESPERANDO_NOMBRE':
+                    if (bodyLower === 'volver') {
+                        conversacionesActivas[phone].step = 'ESPERANDO_ESPECIALIDAD';
+                        const mEsp = Object.entries(PROFESIONALES).map(([k, v]) => `${k}. ${v}`).join("\n");
+                        await msg.reply(`Regresemos.\n\nPor favor, seleccione el área:\n\n${mEsp}`);
+                        return;
+                    }
+
+                    if (!validarNombre(body)) {
+                        await msg.reply('❌ El nombre ingresado no parece válido. Por favor, escríbalo sin números y use nombres reales.');
+                        return;
+                    }
+
+                    conversacionesActivas[phone].nombrePaciente = body;
+                    conversacionesActivas[phone].step = 'ESPERANDO_RUT';
+                    await msg.reply('📋 *¡Recibido!* Ahora ingrese el *RUT* del paciente (sin puntos y con guion, ej: 12345678-9):');
+                    saveSessions();
+                    break;
+
+                case 'ESPERANDO_RUT':
+                    if (bodyLower === 'volver') {
+                        conversacionesActivas[phone].step = 'ESPERANDO_NOMBRE';
+                        await msg.reply('Regresemos. Por favor, escriba el *Nombre Completo* del paciente.');
+                        return;
+                    }
+
+                    if (!validarRUT(body)) {
+                        await msg.reply('❌ El RUT ingresado es inválido o tiene un formato incorrecto. Ejemplo válido: 12345678-9');
+                        return;
+                    }
+
+                    conversacionesActivas[phone].rut = body;
                     conversacionesActivas[phone].step = 'ESPERANDO_MOTIVO';
-                    await msg.reply(`Perfecto. Ahora, indique brevemente el *Motivo* de su consulta para el profesional ${body}.`);
+                    await msg.reply('📍 *Último paso:* Por favor describa brevemente el *Motivo* o comentario de su solicitud.');
                     saveSessions();
                     break;
 
                 case 'ESPERANDO_MOTIVO':
-                    const motivo = body;
-                    const tipo = conversacionesActivas[phone].tipo;
-                    const profesional = conversacionesActivas[phone].profesional;
+                    if (bodyLower === 'volver') {
+                        conversacionesActivas[phone].step = 'ESPERANDO_RUT';
+                        await msg.reply('Regresemos. Ingrese el *RUT* del paciente (ej: 12345678-9):');
+                        saveSessions();
+                        return;
+                    }
+
+                    const sess = conversacionesActivas[phone];
+                    const solicitudFinal = {
+                        fecha: new Date().toISOString(),
+                        telefono: phone,
+                        nombre: sess.nombrePaciente,
+                        rut: sess.rut,
+                        especialidad: sess.especialidad,
+                        tipo: sess.tipo,
+                        motivo: body,
+                        status: 'PENDIENTE',
+                        createdAt: admin.firestore.FieldValue.serverTimestamp()
+                    };
 
                     // GUARDAR EN FIRESTORE
-                    await admin.firestore().collection('solicitudes_camelia').add({
-                        paciente_telefono: phone,
-                        tipo: tipo,
-                        profesional: profesional,
-                        motivo: motivo,
-                        estado: 'PENDIENTE',
-                        fecha: admin.firestore.FieldValue.serverTimestamp()
-                    });
+                    try {
+                        await admin.firestore().collection('solicitudes_camelia').add(solicitudFinal);
+                        
+                        // Emitir eventos en tiempo real
+                        io.emit('nueva_solicitud', solicitudFinal);
+                        io.emit('log', `✅ Solicitud de ${solicitudFinal.nombre} (${solicitudFinal.especialidad}) registrada con éxito.`);
 
-                    await msg.reply(`✅ *Muchas gracias.* Su solicitud para ${profesional} ha sido recibida y está siendo procesada.\n\nUn funcionario se pondrá en contacto con usted a la brevedad para confirmar la fecha y hora final. ¡Que tenga un buen día!`);
-                    
-                    io.emit('log', `🌸 Nueva solicitud de ${phone} para ${profesional} (Pendiente en Dashboard).`);
-                    io.emit('nueva_solicitud', { phone, profesional, tipo });
-                    
-                    // Finalizar flujo
-                    delete conversacionesActivas[phone];
-                    saveSessions();
+                        await msg.reply(`✅ *¡Solicitud registrada con éxito!*\n\nSu requerimiento para *${solicitudFinal.especialidad}* ha sido ingresado al sistema del *Hospital de Curepto*.\n\nUn funcionario revisará los datos y lo contactará a la brevedad.\n\n¡Muchas gracias!`);
+                        
+                        // Finalizar y Limpiar
+                        delete conversacionesActivas[phone];
+                        saveSessions();
+                    } catch (err) {
+                        console.error("Error guardando solicitud:", err);
+                        await msg.reply('⚠️ Lo sentimos, hubo un error técnico al guardar su solicitud. Por favor, inténtelo de nuevo más tarde o llame al 75 256 5688.');
+                    }
                     break;
 
                 default:
                     delete conversacionesActivas[phone];
+                    saveSessions();
+                    break;
                     saveSessions();
                     break;
             }
