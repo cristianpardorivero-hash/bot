@@ -67,30 +67,23 @@ const authenticate = async (req, res, next) => {
 };
 
 const app = express();
-
-// Configuración de CORS Unificada y Robusta
-const whiteList = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://botsome.up.railway.app",
-    "https://bot-production-d6f9.up.railway.app"
-];
-
 app.use(cors({
-    origin: function(origin, callback) {
-        // Permitir solicitudes sin origen (como apps móviles o curl)
-        // O solicitudes que estén en nuestra lista blanca
-        if (!origin || whiteList.indexOf(origin) !== -1 || origin.includes('railway.app')) {
+    origin: (origin, callback) => {
+        const whiteList = [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "https://botsome.up.railway.app",
+            "https://bot-production-d6f9.up.railway.app"
+        ];
+        if (!origin || whiteList.indexOf(origin) !== -1 || process.env.ALLOWED_ORIGINS) {
             callback(null, true);
         } else {
-            console.log("🚫 Origen bloqueado por CORS:", origin);
             callback(new Error('No permitido por CORS'));
         }
     },
-    methods: ["GET", "POST", "DELETE", "OPTIONS", "PUT"],
+    methods: ["GET", "POST", "DELETE", "OPTIONS"],
     credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
-    optionsSuccessStatus: 200 // Algunas versiones de navegadores antiguos fallan con 204
+    allowedHeaders: ["Content-Type", "Authorization"]
 }));
 app.use(express.json());
 
@@ -105,22 +98,10 @@ const ALLOWED_ORIGINS = [
 
 const io = new Server(server, {
     cors: {
-        origin: (origin, callback) => {
-            if (!origin || whiteList.indexOf(origin) !== -1 || origin.includes('railway.app')) {
-                callback(null, true);
-            } else {
-                callback(new Error('CORS Socket Fail'));
-            }
-        },
-        methods: ["GET", "POST"],
-        credentials: true
-    },
-    allowEIO3: true,
-    pingTimeout: 60000,
-    pingInterval: 25000
+        origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ALLOWED_ORIGINS,
+        methods: ["GET", "POST"]
+    }
 });
-
-console.log("🌐 Socket.io configurado con CORS para Railway.");
 
 // Diagnóstico de errores globales
 process.on('unhandledRejection', (reason, promise) => {
@@ -196,8 +177,6 @@ async function logMessageToFirestore(data) {
 }
 
 function initializeWhatsApp() {
-    io.emit('log', "🚀 Iniciando motor de WhatsApp v2.0...");
-    
     // Detección mejorada para Railway/Linux y Windows
     const chromePaths = [
         process.env.PUPPETEER_EXECUTABLE_PATH, 
@@ -209,14 +188,12 @@ function initializeWhatsApp() {
     ];
     
     let executablePath = chromePaths.find(p => p && fs.existsSync(p));
-    console.log(`🔍 Navegador detectado en: ${executablePath || 'Propio del sistema'}`);
-    io.emit('log', `🔍 Navegador: ${executablePath ? 'Configurado' : 'Buscando...'}`);
 
     client = new Client({
         authStrategy: new LocalAuth(),
         webVersionCache: {
             type: 'remote',
-            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1014133523-alpha.html',
+            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
         },
         puppeteer: {
             headless: 'new',
@@ -235,8 +212,6 @@ function initializeWhatsApp() {
             ]
         }
     });
-
-    io.emit('log', "📡 Solicitando conexión a los servidores de WhatsApp...");
 
     // Detectar si el navegador o la página se cierran solos
     client.on('change_state', (state) => {
@@ -282,6 +257,7 @@ function initializeWhatsApp() {
         console.error('❌ WhatsApp Auth Failure:', msg);
         io.emit('whatsapp_status', { state: 'AUTH_FAILURE', message: 'Error de autenticación. Escanea el QR de nuevo.' });
     });
+
     client.on('disconnected', (reason) => {
         console.log('Disconnected', reason);
         clientReady = false;
@@ -290,257 +266,145 @@ function initializeWhatsApp() {
     });
 
     client.on('message_create', async (msg) => {
-        // Ignorar mensajes largos enviados por el bot para evitar bucles
-        if (msg.fromMe && msg.body.length > 30) return;
+        // Ignorar mis propios mensajes salientes largos (solo escuchar mis respuestas cortas 1,2,3 para debug)
+        if (msg.fromMe && msg.body.length > 5) return; 
 
-        const numberOnly = msg.from.replace(/\D/g, '');
-        const body = String(msg.body || '').trim();
+        const fromRaw = msg.from; 
+        const numberOnly = fromRaw.replace(/\D/g, ''); 
+        const body = msg.body.trim();
+        
+        incomingLogs.push({
+            time: new Date().toISOString(),
+            from: fromRaw,
+            body: body,
+            type: msg.type
+        });
+        if (incomingLogs.length > 50) incomingLogs.shift();
+        
+        // NORMALIZACIÓN AGRESIVA: Extraer solo los números (ej: "3️⃣" -> "3", "3 reagendar" -> "3")
+        let cleanBody = body.replace(/\D/g, '');
+        if (cleanBody.length > 1) cleanBody = cleanBody.substring(0, 1);
 
-        // LOG DE DEPURACIÓN PARA EL DASHBOARD - Siempre registrar intentos de usuario
-        if (!msg.fromMe) {
-            io.emit('log', `📩 [DEBUG] Recibido de ${numberOnly}: "${body}"`);
-            console.log(`📩 Mensaje de ${numberOnly}: "${body}"`);
+        if (cleanBody !== '1' && cleanBody !== '2' && cleanBody !== '3') return;
+
+        console.log(`📩 Actividad detectada de ${fromRaw}: "${cleanBody}"`);
+        io.emit('log', `📩 Bot escuchó: "${cleanBody}" de ${numberOnly}`);
+        io.emit('log', `🔍 Paso 1: Normalizado a "${cleanBody}". Buscando paciente...`);
+
+        const match = Object.keys(sessions).find(id => {
+            const cleanId = id.replace(/\D/g, '');
+            // Coincidencia por últimos 8 dígitos (más robusto para variaciones de +569 / 9 / 56)
+            return cleanId.slice(-8) === numberOnly.slice(-8);
+        });
+
+        if (!match) {
+            io.emit('log', `❌ No se encontró una cita activa (Radar) para el número terminando en ${numberOnly.slice(-4)}.`);
         }
 
-        try {
-            const chat = await msg.getChat();
-            if (chat.isGroup) return;
+        if (match) {
+            io.emit('log', `✅ Paso 2: Coincidencia con "${sessions[match].nombre}". Procesando respuesta ${cleanBody}...`);
+            console.log(`¡Coincidencia total con paciente: ${sessions[match].nombre}!`);
+            let updated = false;
 
-            // 1. PRIORIDAD: CAMPAÑAS (Opciones 1, 2, 3)
-            let cleanBody = body.replace(/\D/g, '');
-            if (cleanBody.length > 1) cleanBody = cleanBody.substring(0, 1);
-
-            const isOption = cleanBody === '1' || cleanBody === '2' || cleanBody === '3';
-            
-            // Buscar sesión de campaña activa por los últimos 8 dígitos
-            const match = Object.keys(sessions).find(id => {
-                const cleanId = id.replace(/\D/g, '');
-                return cleanId.slice(-8) === numberOnly.slice(-8);
-            });
-
-            // PRIORIDAD: Si el usuario ya está interactuando con Camelia, Camelia tiene el control.
-            // Si no hay charla activa con Camelia, y es una opción (1,2,3) que coincide con una campaña, procesar campaña.
-            const tieneCharlaActiva = conversacionesActivas[numberOnly] && conversacionesActivas[numberOnly].step !== 'INICIO';
-
-            if (isOption && match && !tieneCharlaActiva) {
-                let updated = false;
-                if (cleanBody === '1') {
-                    sessions[match].status = 'Confirmada';
-                    await msg.reply('✅ *Gracias!* Su cita ha sido confirmada.');
-                    io.emit('log', `✅ ${sessions[match].nombre} ha CONFIRMADO su cita.`);
-                    updated = true;
-                } else if (cleanBody === '2') {
-                    sessions[match].status = 'Cancelada';
-                    await msg.reply('❌ *Entendido.* Cita cancelada.');
-                    io.emit('log', `❌ ${sessions[match].nombre} ha CANCELADO su cita.`);
-                    updated = true;
-                } else if (cleanBody === '3') {
-                    sessions[match].status = 'Reagendar';
-                    await msg.reply('🕒 *Entendido.* Un/a Funcionario/a se pondrá en contacto con usted a la brevedad para coordinar su nueva hora.');
-                    io.emit('log', `🕒 ${sessions[match].nombre} ha solicitado REAGENDAR su cita.`);
-                    updated = true;
-                }
-
-                if (updated) {
-                    sessions[match].lastUpdated = new Date().toISOString();
-                    saveSessions();
-                    io.emit('status_update', { id: match, status: sessions[match].status, data: sessions[match] });
-                }
-            } else {
-                // 2. LOGICA DE CAMELIA (Texto libre o flujo interactivo)
-                const estaActiva = conversacionesActivas._config?.activa !== false;
-
-                if (estaActiva || tieneCharlaActiva) {
-                    await handleCameliaFlow(msg, numberOnly);
-                } else if (!msg.fromMe) {
-                    console.log(`⏸️ Camelia está en silencio para ${numberOnly}`);
-                }
+            if (cleanBody === '1') {
+                sessions[match].status = 'Confirmada';
+                await msg.reply('✅ *Gracias!* Su cita ha sido confirmada.');
+                io.emit('log', `✅ ${sessions[match].nombre} ha CONFIRMADO su cita.`);
+                updated = true;
+            } else if (cleanBody === '2') {
+                sessions[match].status = 'Cancelada';
+                await msg.reply('❌ *Entendido.* Cita cancelada.');
+                io.emit('log', `❌ ${sessions[match].nombre} ha CANCELADO su cita.`);
+                updated = true;
+            } else if (cleanBody === '3') {
+                sessions[match].status = 'Reagendar';
+                await msg.reply('🕒 *Entendido.* Un/a Funcionario/a se pondrá en contacto con usted a la brevedad para coordinar su nueva hora. Si lo prefiere, puede llamar al *75 256 5688* o realice una solicitud por https://telesalud.gob.cl/');
+                io.emit('log', `🕒 ${sessions[match].nombre} ha solicitado REAGENDAR su cita.`);
+                updated = true;
             }
-        } catch (error) {
-            console.error("❌ Error en message_create:", error);
-            if (!msg.fromMe) io.emit('log', `❌ Error procesando mensaje de ${numberOnly}`);
+
+            if (updated) {
+                sessions[match].lastUpdated = new Date().toISOString();
+                saveSessions();
+                io.emit('status_update', { id: match, status: sessions[match].status, data: sessions[match] });
+                io.emit('progress', {
+                    status: 'success',
+                    phone: sessions[match].telefonoOriginal || match.split('@')[0],
+                    message: `Respuesta procesada: ${sessions[match].status} (${sessions[match].nombre})`
+                });
+            }
+        } else {
+            // --- LOGICA DE CAMELIA ---
+            // Solo procesamos si Camelia está ACTIVA o si el usuario ya tiene una charla iniciada
+            const estaActiva = conversacionesActivas._config?.activa !== false;
+            const tieneCharlaActiva = conversacionesActivas[numberOnly];
+
+            if (estaActiva || tieneCharlaActiva) {
+                await handleCameliaFlow(msg, numberOnly);
+            } else {
+                console.log(`⏸️ Camelia está en silencio para ${numberOnly}`);
+            }
         }
     });
 
-    // --- AYUDANTES DE VALIDACIÓN (Lógica del script anterior) ---
-    function validarRUT(rut) {
-        if (!rut) return false;
-        const cleanRut = String(rut).replace(/[^\dkK]/g, '');
-        if (cleanRut.length < 8 || cleanRut.length > 9) return false;
-        
-        let body = cleanRut.slice(0, -1);
-        let dv = cleanRut.slice(-1).toUpperCase();
-        
-        let sum = 0;
-        let mul = 2;
-        for (let i = body.length - 1; i >= 0; i--) {
-            sum += parseInt(body[i]) * mul;
-            mul = mul === 7 ? 2 : mul + 1;
-        }
-        
-        let res = 11 - (sum % 11);
-        let expectedDv = res === 11 ? '0' : res === 10 ? 'K' : String(res);
-        return dv === expectedDv;
-    }
-
-    function validarNombre(nombre) {
-        if (!nombre || nombre.length < 3) return false;
-        if (/\d/.test(nombre)) return false; // No números
-        if (/[^a-zA-ZáéíóúÁÉÍÓÚñÑ\s]/.test(nombre)) return false; // No caracteres raros
-        return true;
-    }
-
-    const PROFESIONALES = {
-        1: "Médico General",
-        2: "Pediatría",
-        3: "Matrona / Salud Sexual",
-        4: "Kinesiólogo / Rehabilitación",
-        5: "Nutricionista",
-        6: "Psicólogo / Salud Mental",
-        7: "Odontología"
-    };
-
     // Función principal para el flujo conversacional de Camelia
     async function handleCameliaFlow(msg, phone) {
-        const body = String(msg.body || '').trim();
-        const bodyLower = body.toLowerCase();
-
-        // Comandos Globales de Navegación
-        if (bodyLower === 'reset' || bodyLower === 'salir' || bodyLower === 'cancelar') {
-            delete conversacionesActivas[phone];
-            saveSessions();
-            await msg.reply('🔄 *Operación cancelada.* Escriba "Hola" cuando desee volver a empezar.');
-            io.emit('log', `🔄 Sesión de ${phone} reiniciada/cancelada.`);
-            return;
-        }
-
         const estado = conversacionesActivas[phone] || { step: 'INICIO' };
+        const body = msg.body.trim();
 
         try {
             switch(estado.step) {
                 case 'INICIO':
                     conversacionesActivas[phone] = { step: 'MENU_PRINCIPAL' };
                     await msg.reply('🌸 *Hola, soy Camelia*, su asistente virtual del Hospital de Curepto.\n\n¿En qué puedo ayudarle hoy?\n\n*1.* Solicitar una hora médica.\n*2.* Cambiar o reagendar una hora existente.\n*3.* Consultar horarios.');
-                    io.emit('log', `📤 Camelia saludó a ${phone} (Inicio de flujo)`);
                     saveSessions();
                     break;
 
                 case 'MENU_PRINCIPAL':
                     if (body === '1' || body === '2') {
-                        const tipo = body === '1' ? 'Solicitud' : 'Cambio';
                         conversacionesActivas[phone] = { 
-                            step: 'ESPERANDO_ESPECIALIDAD', 
-                            tipo 
+                            step: 'ESPERANDO_PROFESIONAL', 
+                            tipo: body === '1' ? 'Solicitud' : 'Cambio' 
                         };
-                        
-                        const menuEsp = Object.entries(PROFESIONALES)
-                            .map(([k, v]) => `${k}. ${v}`)
-                            .join("\n");
-
-                        await msg.reply(`🩺 *${tipo.toUpperCase()} DE HORA*\n\nPor favor, seleccione el área o especialidad:\n\n${menuEsp}\n\n_Escriba el número o "salir"_`);
-                        saveSessions();
+                        await msg.reply('Entendido. Por favor, escriba el nombre o la especialidad del *Profesional* con quien desea atenderse.');
                     } else if (body === '3') {
                         await msg.reply('Nuestro horario de atención general es de lunes a viernes, de 08:00 a 17:00 horas. Para consultas específicas, puede llamar al 75 256 5688.');
-                        // Mantener estado o resetear? lo dejamos en menu por si quiere otra cosa
+                        // Mantenemos el paso o reseteamos
                     } else {
                         await msg.reply('Por favor, seleccione una opción válida (1, 2 o 3).');
                     }
-                    break;
-
-                case 'ESPERANDO_ESPECIALIDAD':
-                    if (bodyLower === 'volver') {
-                        conversacionesActivas[phone].step = 'MENU_PRINCIPAL';
-                        await msg.reply('Regresemos al Menú Principal.\n\n*1.* Solicitar una hora médica.\n*2.* Cambiar o reagendar una hora existente.\n*3.* Consultar horarios.');
-                        return;
-                    }
-
-                    const numEsp = parseInt(body);
-                    if (!PROFESIONALES[numEsp]) {
-                        await msg.reply('⚠️ Opción no válida. Elija un número de la lista (1-7) o escriba "salir".');
-                        return;
-                    }
-
-                    conversacionesActivas[phone].especialidad = PROFESIONALES[numEsp];
-                    conversacionesActivas[phone].step = 'ESPERANDO_NOMBRE';
-                    await msg.reply(`📝 Ha seleccionado: *${PROFESIONALES[numEsp]}*.\n\nPara continuar, por favor escriba el *Nombre Completo* del paciente.`);
                     saveSessions();
                     break;
 
-                case 'ESPERANDO_NOMBRE':
-                    if (bodyLower === 'volver') {
-                        conversacionesActivas[phone].step = 'ESPERANDO_ESPECIALIDAD';
-                        const mEsp = Object.entries(PROFESIONALES).map(([k, v]) => `${k}. ${v}`).join("\n");
-                        await msg.reply(`Regresemos.\n\nPor favor, seleccione el área:\n\n${mEsp}`);
-                        return;
-                    }
-
-                    if (!validarNombre(body)) {
-                        await msg.reply('❌ El nombre ingresado no parece válido. Por favor, escríbalo sin números y use nombres reales.');
-                        return;
-                    }
-
-                    conversacionesActivas[phone].nombrePaciente = body;
-                    conversacionesActivas[phone].step = 'ESPERANDO_RUT';
-                    await msg.reply('📋 *¡Recibido!* Ahora ingrese el *RUT* del paciente (sin puntos y con guion, ej: 12345678-9):');
-                    saveSessions();
-                    break;
-
-                case 'ESPERANDO_RUT':
-                    if (bodyLower === 'volver') {
-                        conversacionesActivas[phone].step = 'ESPERANDO_NOMBRE';
-                        await msg.reply('Regresemos. Por favor, escriba el *Nombre Completo* del paciente.');
-                        return;
-                    }
-
-                    if (!validarRUT(body)) {
-                        await msg.reply('❌ El RUT ingresado es inválido o tiene un formato incorrecto. Ejemplo válido: 12345678-9');
-                        return;
-                    }
-
-                    conversacionesActivas[phone].rut = body;
+                case 'ESPERANDO_PROFESIONAL':
+                    conversacionesActivas[phone].profesional = body;
                     conversacionesActivas[phone].step = 'ESPERANDO_MOTIVO';
-                    await msg.reply('📍 *Último paso:* Por favor describa brevemente el *Motivo* o comentario de su solicitud.');
+                    await msg.reply(`Perfecto. Ahora, indique brevemente el *Motivo* de su consulta para el profesional ${body}.`);
                     saveSessions();
                     break;
 
                 case 'ESPERANDO_MOTIVO':
-                    if (bodyLower === 'volver') {
-                        conversacionesActivas[phone].step = 'ESPERANDO_RUT';
-                        await msg.reply('Regresemos. Ingrese el *RUT* del paciente (ej: 12345678-9):');
-                        saveSessions();
-                        return;
-                    }
-
-                    const sess = conversacionesActivas[phone];
-                    const solicitudFinal = {
-                        fecha: new Date().toISOString(),
-                        telefono: phone,
-                        nombre: sess.nombrePaciente,
-                        rut: sess.rut,
-                        especialidad: sess.especialidad,
-                        tipo: sess.tipo,
-                        motivo: body,
-                        status: 'PENDIENTE',
-                        createdAt: admin.firestore.FieldValue.serverTimestamp()
-                    };
+                    const motivo = body;
+                    const tipo = conversacionesActivas[phone].tipo;
+                    const profesional = conversacionesActivas[phone].profesional;
 
                     // GUARDAR EN FIRESTORE
-                    try {
-                        await admin.firestore().collection('solicitudes_camelia').add(solicitudFinal);
-                        
-                        // Emitir eventos en tiempo real
-                        io.emit('nueva_solicitud', solicitudFinal);
-                        io.emit('log', `✅ Solicitud de ${solicitudFinal.nombre} (${solicitudFinal.especialidad}) registrada con éxito.`);
+                    await admin.firestore().collection('solicitudes_camelia').add({
+                        paciente_telefono: phone,
+                        tipo: tipo,
+                        profesional: profesional,
+                        motivo: motivo,
+                        estado: 'PENDIENTE',
+                        fecha: admin.firestore.FieldValue.serverTimestamp()
+                    });
 
-                        await msg.reply(`✅ *¡Solicitud registrada con éxito!*\n\nSu requerimiento para *${solicitudFinal.especialidad}* ha sido ingresado al sistema del *Hospital de Curepto*.\n\nUn funcionario revisará los datos y lo contactará a la brevedad.\n\n¡Muchas gracias!`);
-                        
-                        // Finalizar y Limpiar
-                        delete conversacionesActivas[phone];
-                        saveSessions();
-                    } catch (err) {
-                        console.error("Error guardando solicitud:", err);
-                        await msg.reply('⚠️ Lo sentimos, hubo un error técnico al guardar su solicitud. Por favor, inténtelo de nuevo más tarde o llame al 75 256 5688.');
-                    }
+                    await msg.reply(`✅ *Muchas gracias.* Su solicitud para ${profesional} ha sido recibida y está siendo procesada.\n\nUn funcionario se pondrá en contacto con usted a la brevedad para confirmar la fecha y hora final. ¡Que tenga un buen día!`);
+                    
+                    io.emit('log', `🌸 Nueva solicitud de ${phone} para ${profesional} (Pendiente en Dashboard).`);
+                    
+                    // Finalizar flujo
+                    delete conversacionesActivas[phone];
+                    saveSessions();
                     break;
 
                 default:
@@ -563,19 +427,11 @@ function initializeWhatsApp() {
     }, 120000);
 
     console.log('--- Intentando inicializar WhatsApp Client... ---');
-    io.emit('log', "🚀 Llamando a client.initialize()...");
-    
     client.initialize().catch(err => {
         console.error('❌ Falló el arranque de WhatsApp:', err.message);
         clearTimeout(initTimeout);
-        io.emit('log', `❌ Error de arranque: ${err.message}`);
         io.emit('whatsapp_status', { state: 'ERROR', message: 'Falla crítica del navegador. Reintentando...' });
-        
-        // Re-intento automático tras falla crítica
-        setTimeout(() => {
-            io.emit('log', "🔄 Reintentando inicialización completa...");
-            initializeWhatsApp();
-        }, 15000);
+        setTimeout(() => initializeWhatsApp(), 10000);
     });
     
     client.on('ready', () => {
@@ -924,14 +780,7 @@ app.post('/send-messages', authenticate, async (req, res) => {
                 continue;
             }
 
-            // Normalización ROBUSTA de números chilenos
-            let phone = String(row[actualPhoneColumn] || '').trim().replace(/\D/g, '');
-            
-            // Lógica chilena: 56982026807 (11), 982026807 (9), 82026807 (8)
-            if (phone.length === 8) phone = '569' + phone;
-            else if (phone.length === 9 && phone.startsWith('9')) phone = '56' + phone;
-            else if (phone.length === 11 && phone.startsWith('562')) { /* Teléfono fijo Santiago, dejar igual */ }
-            else if (phone.length === 11 && !phone.startsWith('56')) phone = '56' + phone;
+            let phone = String(row[actualPhoneColumn]).trim().replace(/\D/g, '');
             
             if (phone.length < 7 || phone.length > 15) {
                 const errorMsg = `⚠️ Saltando número inválido (${phone}) por longitud.`;
@@ -941,12 +790,45 @@ app.post('/send-messages', authenticate, async (req, res) => {
                 continue;
             }
 
+            if (phone.length === 9 && phone.startsWith('9')) {
+                phone = '56' + phone;
+            }
+
             try {
-                // ELIMINADO getNumberId para evitar bloqueos por latencia
-                // Usamos el formato directo que es 100% fiable en Railway
-                const target = `${phone}@c.us`;
+                io.emit('log', `🔍 Verificando WhatsApp para: ${phone}...`);
                 
-                let message = messageTemplate.replace(/{{([^}]+)}}/g, (match, tag) => {
+                // Promesa con TIMEOUT para evitar que se cuelgue el bucle
+                const numberIdPromise = client.getNumberId(phone);
+                const timeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 15000)
+                );
+
+                const numberId = await Promise.race([numberIdPromise, timeoutPromise]).catch(e => {
+                    console.error(`⚠️ Error/Timeout en getNumberId para ${phone}:`, e.message);
+                    io.emit('log', `⚠️ Timeout o error verificando ${phone}.`);
+                    return null;
+                });
+                
+                if (!numberId) {
+                    const errorMsg = `❌ El número ${phone} NO está registrado en WhatsApp.`;
+                    console.warn(errorMsg);
+                    io.emit('log', errorMsg);
+                    io.emit('progress', {
+                        index: i,
+                        total: data.length,
+                        status: 'failed',
+                        phone: phone,
+                        error: 'El número no está registrado en WhatsApp.'
+                    });
+                    continue;
+                }
+                phone = numberId._serialized;
+            } catch (err) {
+                console.error(`🔴 Error fatal verificando número ${phone}:`, err.message);
+                continue;
+            }
+
+            let message = messageTemplate.replace(/{{([^}]+)}}/g, (match, tag) => {
                 const cleanTag = tag.trim().toLowerCase();
                 const exactKeys = {
                     'nombre': 'Nombre',
@@ -976,12 +858,13 @@ app.post('/send-messages', authenticate, async (req, res) => {
                 return match;
             });
 
-            io.emit('log', `📤 Enviando a ${phone}...`);
-            await client.sendMessage(target, message);
-            console.log(`✅ Mensaje enviado a: ${phone}`);
-            io.emit('log', `✅ Mensaje enviado exitosamente a ${phone}`);
-            
-            const getValue = (keys) => {
+            try {
+                io.emit('log', `📤 Enviando a ${phone}...`);
+                await client.sendMessage(phone, message);
+                console.log(`✅ Mensaje enviado a: ${phone}`);
+                io.emit('log', `✅ Mensaje enviado exitosamente a ${phone}`);
+                
+                const getValue = (keys) => {
                     const foundKey = Object.keys(row).find(k => 
                         keys.some(search => k.trim().toLowerCase().includes(search.toLowerCase()))
                     );
@@ -1074,8 +957,14 @@ app.post('/send-manual', authenticate, async (req, res) => {
         else if (phone.length === 9 && phone.startsWith('9')) phone = '56' + phone;
 
         try {
-            const target = `${phone}@c.us`;
-            await client.sendMessage(target, message);
+            const numberId = await client.getNumberId(phone);
+            if (!numberId) {
+                const errorMsg = `❌ Número manual ${phone} no registrado en WhatsApp.`;
+                io.emit('log', errorMsg);
+                return res.status(404).send(errorMsg);
+            }
+
+            await client.sendMessage(numberId._serialized, message);
             io.emit('log', `✅ Envío manual exitoso a ${phone}`);
 
             // Registro histórico en Firestore
@@ -1224,20 +1113,12 @@ app.post('/admin/update-user', authenticate, async (req, res) => {
 app.post('/whatsapp/reset', authenticate, async (req, res) => {
     try {
         // Verificar ADMIN
-        const user = req.user;
-        const callerUid = user.uid;
-        const callerEmail = user.email;
-        
+        const callerUid = req.user.uid;
         let callerDoc = await admin.firestore().collection('usuarios').doc(callerUid).get();
-        if (!callerDoc.exists && callerEmail) {
-            callerDoc = await admin.firestore().collection('usuarios').doc(callerEmail).get();
-        }
+        if (!callerDoc.exists) callerDoc = await admin.firestore().collection('usuarios').doc(req.user.email).get();
 
-        const role = callerDoc.exists ? String(callerDoc.data().role || '').toUpperCase() : 'NONE';
-
-        if (role !== 'ADMIN') {
-            console.warn(`🚫 Intento de reinicio fallido. Usuario: ${callerEmail}, Rol detectado: ${role}`);
-            return res.status(403).send(`No autorizado. Tu rol es ${role}.`);
+        if (!callerDoc.exists || callerDoc.data().role !== 'ADMIN') {
+            return res.status(403).send('No autorizado.');
         }
 
         console.log("♻️ Reinicio total solicitado...");

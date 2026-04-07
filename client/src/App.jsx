@@ -173,21 +173,6 @@ const AppContent = () => {
       setIsCameliaActive(active);
     });
 
-    socket.on('nueva_solicitud', (data) => {
-      // Notificación Visual (Si no estamos en solicitudes)
-      if (activeView !== 'solicitudes') {
-        alert(`🌸 ¡NUEVA SOLICITUD DE CAMELIA!\n\nPaciente: ${data.phone}\nProfesional: ${data.profesional}\nTipo: ${data.tipo}`);
-      }
-      
-      // Notificación Sonora
-      try {
-        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-        audio.play().catch(e => console.log("Audio play blocked (user-interaction required)"));
-      } catch (e) {
-        console.error("Error al reproducir sonido:", e);
-      }
-    });
-
     return () => {
       socket.off('connect');
       socket.off('qr');
@@ -199,7 +184,6 @@ const AppContent = () => {
       socket.off('status_update');
       socket.off('whatsapp_status');
       socket.off('camelia_status');
-      socket.off('nueva_solicitud');
     };
   }, [socket]);
 
