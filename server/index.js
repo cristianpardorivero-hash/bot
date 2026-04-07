@@ -216,7 +216,7 @@ function initializeWhatsApp() {
         authStrategy: new LocalAuth(),
         webVersionCache: {
             type: 'remote',
-            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1014133523-alpha.html',
         },
         puppeteer: {
             headless: 'new',
@@ -944,14 +944,15 @@ app.post('/send-messages', authenticate, async (req, res) => {
             try {
                 io.emit('log', `🔍 Verificando WhatsApp para: ${phone}...`);
                 
-                // Promesa con TIMEOUT para evitar que se cuelgue el bucle
+                // Promesa con TIMEOUT ampliada para evitar fallos por latencia en Railway
                 const numberIdPromise = client.getNumberId(phone);
                 const timeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 15000)
+                    setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 30000)
                 );
 
                 const numberId = await Promise.race([numberIdPromise, timeoutPromise]).catch(e => {
                     console.error(`⚠️ Error/Timeout en getNumberId para ${phone}:`, e.message);
+                    io.emit('log', `⏳ La validación de ${phone} está tardando... reintentando.`);
                     return null;
                 });
                 
