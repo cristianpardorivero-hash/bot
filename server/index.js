@@ -196,6 +196,8 @@ async function logMessageToFirestore(data) {
 }
 
 function initializeWhatsApp() {
+    io.emit('log', "🚀 Iniciando motor de WhatsApp v2.0...");
+    
     // Detección mejorada para Railway/Linux y Windows
     const chromePaths = [
         process.env.PUPPETEER_EXECUTABLE_PATH, 
@@ -207,6 +209,8 @@ function initializeWhatsApp() {
     ];
     
     let executablePath = chromePaths.find(p => p && fs.existsSync(p));
+    console.log(`🔍 Navegador detectado en: ${executablePath || 'Propio del sistema'}`);
+    io.emit('log', `🔍 Navegador: ${executablePath ? 'Configurado' : 'Buscando...'}`);
 
     client = new Client({
         authStrategy: new LocalAuth(),
@@ -217,20 +221,19 @@ function initializeWhatsApp() {
         puppeteer: {
             headless: 'new',
             executablePath: executablePath || undefined,
-            protocolTimeout: 120000, 
+            protocolTimeout: 180000, // Aumentado a 3 min para Railway
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-extensions',
                 '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
                 '--disable-gpu',
-                '--disable-software-rasterizer'
+                '--no-zygote'
             ]
         }
     });
+
+    io.emit('log', "📡 Solicitando conexión a los servidores de WhatsApp...");
 
     // Detectar si el navegador o la página se cierran solos
     client.on('change_state', (state) => {
@@ -557,11 +560,19 @@ function initializeWhatsApp() {
     }, 120000);
 
     console.log('--- Intentando inicializar WhatsApp Client... ---');
+    io.emit('log', "🚀 Llamando a client.initialize()...");
+    
     client.initialize().catch(err => {
         console.error('❌ Falló el arranque de WhatsApp:', err.message);
         clearTimeout(initTimeout);
+        io.emit('log', `❌ Error de arranque: ${err.message}`);
         io.emit('whatsapp_status', { state: 'ERROR', message: 'Falla crítica del navegador. Reintentando...' });
-        setTimeout(() => initializeWhatsApp(), 10000);
+        
+        // Re-intento automático tras falla crítica
+        setTimeout(() => {
+            io.emit('log', "🔄 Reintentando inicialización completa...");
+            initializeWhatsApp();
+        }, 15000);
     });
     
     client.on('ready', () => {
