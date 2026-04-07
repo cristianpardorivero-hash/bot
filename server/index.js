@@ -276,7 +276,6 @@ function initializeWhatsApp() {
         console.error('❌ WhatsApp Auth Failure:', msg);
         io.emit('whatsapp_status', { state: 'AUTH_FAILURE', message: 'Error de autenticación. Escanea el QR de nuevo.' });
     });
-
     client.on('disconnected', (reason) => {
         console.log('Disconnected', reason);
         clientReady = false;
@@ -285,84 +284,71 @@ function initializeWhatsApp() {
     });
 
     client.on('message_create', async (msg) => {
-        // Ignorar mis propios mensajes salientes largos (solo escuchar mis respuestas cortas 1,2,3 para debug)
-        if (msg.fromMe && msg.body.length > 5) return; 
+        // Ignorar mensajes largos enviados por el bot para evitar bucles
+        if (msg.fromMe && msg.body.length > 20) return;
 
-        const fromRaw = msg.from; 
-        const numberOnly = fromRaw.replace(/\D/g, ''); 
-        const body = msg.body.trim();
-        
-        incomingLogs.push({
-            time: new Date().toISOString(),
-            from: fromRaw,
-            body: body,
-            type: msg.type
-        });
-        if (incomingLogs.length > 50) incomingLogs.shift();
-        
-        // NORMALIZACIÓN AGRESIVA: Extraer solo los números (ej: "3️⃣" -> "3", "3 reagendar" -> "3")
-        let cleanBody = body.replace(/\D/g, '');
-        if (cleanBody.length > 1) cleanBody = cleanBody.substring(0, 1);
+        const numberOnly = msg.from.replace(/\D/g, '');
+        const body = String(msg.body || '').trim();
 
-        if (cleanBody !== '1' && cleanBody !== '2' && cleanBody !== '3') return;
-
-        console.log(`📩 Actividad detectada de ${fromRaw}: "${cleanBody}"`);
-        io.emit('log', `📩 Bot escuchó: "${cleanBody}" de ${numberOnly}`);
-        io.emit('log', `🔍 Paso 1: Normalizado a "${cleanBody}". Buscando paciente...`);
-
-        const match = Object.keys(sessions).find(id => {
-            const cleanId = id.replace(/\D/g, '');
-            // Coincidencia por últimos 8 dígitos (más robusto para variaciones de +569 / 9 / 56)
-            return cleanId.slice(-8) === numberOnly.slice(-8);
-        });
-
-        if (!match) {
-            io.emit('log', `❌ No se encontró una cita activa (Radar) para el número terminando en ${numberOnly.slice(-4)}.`);
+        // LOG DE DEPURACIÓN PARA EL DASHBOARD
+        if (!msg.fromMe) {
+            io.emit('log', `📩 [DEBUG] Recibido de ${numberOnly}: "${body}"`);
         }
 
-        if (match) {
-            io.emit('log', `✅ Paso 2: Coincidencia con "${sessions[match].nombre}". Procesando respuesta ${cleanBody}...`);
-            console.log(`¡Coincidencia total con paciente: ${sessions[match].nombre}!`);
-            let updated = false;
+        try {
+            const chat = await msg.getChat();
+            if (chat.isGroup) return;
 
-            if (cleanBody === '1') {
-                sessions[match].status = 'Confirmada';
-                await msg.reply('✅ *Gracias!* Su cita ha sido confirmada.');
-                io.emit('log', `✅ ${sessions[match].nombre} ha CONFIRMADO su cita.`);
-                updated = true;
-            } else if (cleanBody === '2') {
-                sessions[match].status = 'Cancelada';
-                await msg.reply('❌ *Entendido.* Cita cancelada.');
-                io.emit('log', `❌ ${sessions[match].nombre} ha CANCELADO su cita.`);
-                updated = true;
-            } else if (cleanBody === '3') {
-                sessions[match].status = 'Reagendar';
-                await msg.reply('🕒 *Entendido.* Un/a Funcionario/a se pondrá en contacto con usted a la brevedad para coordinar su nueva hora. Si lo prefiere, puede llamar al *75 256 5688* o realice una solicitud por https://telesalud.gob.cl/');
-                io.emit('log', `🕒 ${sessions[match].nombre} ha solicitado REAGENDAR su cita.`);
-                updated = true;
-            }
+            // 1. PRIORIDAD: CAMPAÑAS (Opciones 1, 2, 3)
+            let cleanBody = body.replace(/\D/g, '');
+            if (cleanBody.length > 1) cleanBody = cleanBody.substring(0, 1);
 
-            if (updated) {
-                sessions[match].lastUpdated = new Date().toISOString();
-                saveSessions();
-                io.emit('status_update', { id: match, status: sessions[match].status, data: sessions[match] });
-                io.emit('progress', {
-                    status: 'success',
-                    phone: sessions[match].telefonoOriginal || match.split('@')[0],
-                    message: `Respuesta procesada: ${sessions[match].status} (${sessions[match].nombre})`
-                });
-            }
-        } else {
-            // --- LOGICA DE CAMELIA ---
-            // Solo procesamos si Camelia está ACTIVA o si el usuario ya tiene una charla iniciada
-            const estaActiva = conversacionesActivas._config?.activa !== false;
-            const tieneCharlaActiva = conversacionesActivas[numberOnly];
+            const isOption = cleanBody === '1' || cleanBody === '2' || cleanBody === '3';
+            
+            // Buscar sesión de campaña activa por los últimos 8 dígitos
+            const match = Object.keys(sessions).find(id => {
+                const cleanId = id.replace(/\D/g, '');
+                return cleanId.slice(-8) === numberOnly.slice(-8);
+            });
 
-            if (estaActiva || tieneCharlaActiva) {
-                await handleCameliaFlow(msg, numberOnly);
+            if (isOption && match) {
+                let updated = false;
+                if (cleanBody === '1') {
+                    sessions[match].status = 'Confirmada';
+                    await msg.reply('✅ *Gracias!* Su cita ha sido confirmada.');
+                    io.emit('log', `✅ ${sessions[match].nombre} ha CONFIRMADO su cita.`);
+                    updated = true;
+                } else if (cleanBody === '2') {
+                    sessions[match].status = 'Cancelada';
+                    await msg.reply('❌ *Entendido.* Cita cancelada.');
+                    io.emit('log', `❌ ${sessions[match].nombre} ha CANCELADO su cita.`);
+                    updated = true;
+                } else if (cleanBody === '3') {
+                    sessions[match].status = 'Reagendar';
+                    await msg.reply('🕒 *Entendido.* Un/a Funcionario/a se pondrá en contacto con usted a la brevedad para coordinar su nueva hora.');
+                    io.emit('log', `🕒 ${sessions[match].nombre} ha solicitado REAGENDAR su cita.`);
+                    updated = true;
+                }
+
+                if (updated) {
+                    sessions[match].lastUpdated = new Date().toISOString();
+                    saveSessions();
+                    io.emit('status_update', { id: match, status: sessions[match].status, data: sessions[match] });
+                }
             } else {
-                console.log(`⏸️ Camelia está en silencio para ${numberOnly}`);
+                // 2. LOGICA DE CAMELIA (Texto libre o flujo interactivo)
+                const estaActiva = conversacionesActivas._config?.activa !== false;
+                const tieneCharlaActiva = conversacionesActivas[numberOnly];
+
+                if (estaActiva || tieneCharlaActiva) {
+                    await handleCameliaFlow(msg, numberOnly);
+                } else if (!msg.fromMe) {
+                    console.log(`⏸️ Camelia está en silencio para ${numberOnly}`);
+                }
             }
+        } catch (error) {
+            console.error("❌ Error en message_create:", error);
+            if (!msg.fromMe) io.emit('log', `❌ Error procesando mensaje de ${numberOnly}`);
         }
     });
 
