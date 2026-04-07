@@ -354,14 +354,25 @@ function initializeWhatsApp() {
 
     // Función principal para el flujo conversacional de Camelia
     async function handleCameliaFlow(msg, phone) {
+        const body = String(msg.body || '').trim();
+
+        // Comando secreto de reinicio para pruebas
+        if (body.toUpperCase() === 'RESET') {
+            delete conversacionesActivas[phone];
+            saveSessions();
+            await msg.reply('🔄 *Sesión Reiniciada.* Escriba "Hola" para comenzar de nuevo.');
+            io.emit('log', `🔄 Sesión de ${phone} reiniciada por comando RESET.`);
+            return;
+        }
+
         const estado = conversacionesActivas[phone] || { step: 'INICIO' };
-        const body = msg.body.trim();
 
         try {
             switch(estado.step) {
                 case 'INICIO':
                     conversacionesActivas[phone] = { step: 'MENU_PRINCIPAL' };
                     await msg.reply('🌸 *Hola, soy Camelia*, su asistente virtual del Hospital de Curepto.\n\n¿En qué puedo ayudarle hoy?\n\n*1.* Solicitar una hora médica.\n*2.* Cambiar o reagendar una hora existente.\n*3.* Consultar horarios.');
+                    io.emit('log', `📤 Camelia saludó a ${phone} (Inicio de flujo)`);
                     saveSessions();
                     break;
 
