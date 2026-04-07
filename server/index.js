@@ -67,23 +67,30 @@ const authenticate = async (req, res, next) => {
 };
 
 const app = express();
+
+// Configuración de CORS Unificada y Robusta
+const whiteList = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://botsome.up.railway.app",
+    "https://bot-production-d6f9.up.railway.app"
+];
+
 app.use(cors({
-    origin: (origin, callback) => {
-        const whiteList = [
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "https://botsome.up.railway.app",
-            "https://bot-production-d6f9.up.railway.app"
-        ];
-        if (!origin || whiteList.indexOf(origin) !== -1 || process.env.ALLOWED_ORIGINS) {
+    origin: function(origin, callback) {
+        // Permitir solicitudes sin origen (como apps móviles o curl)
+        // O solicitudes que estén en nuestra lista blanca
+        if (!origin || whiteList.indexOf(origin) !== -1 || origin.includes('railway.app')) {
             callback(null, true);
         } else {
+            console.log("🚫 Origen bloqueado por CORS:", origin);
             callback(new Error('No permitido por CORS'));
         }
     },
-    methods: ["GET", "POST", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "DELETE", "OPTIONS", "PUT"],
     credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization"]
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+    optionsSuccessStatus: 200 // Algunas versiones de navegadores antiguos fallan con 204
 }));
 app.use(express.json());
 
@@ -98,10 +105,22 @@ const ALLOWED_ORIGINS = [
 
 const io = new Server(server, {
     cors: {
-        origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ALLOWED_ORIGINS,
-        methods: ["GET", "POST"]
-    }
+        origin: (origin, callback) => {
+            if (!origin || whiteList.indexOf(origin) !== -1 || origin.includes('railway.app')) {
+                callback(null, true);
+            } else {
+                callback(new Error('CORS Socket Fail'));
+            }
+        },
+        methods: ["GET", "POST"],
+        credentials: true
+    },
+    allowEIO3: true,
+    pingTimeout: 60000,
+    pingInterval: 25000
 });
+
+console.log("🌐 Socket.io configurado con CORS para Railway.");
 
 // Diagnóstico de errores globales
 process.on('unhandledRejection', (reason, promise) => {
