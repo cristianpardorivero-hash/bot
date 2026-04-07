@@ -219,16 +219,18 @@ function initializeWhatsApp() {
             remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
         },
         puppeteer: {
-            headless: 'new',
+            headless: true, // Modo más estable
             executablePath: executablePath || undefined,
-            protocolTimeout: 180000, // Aumentado a 3 min para Railway
+            protocolTimeout: 300000, // Aumentado a 5 min para máxima estabilidad
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-extensions',
                 '--disable-dev-shm-usage',
                 '--disable-gpu',
-                '--no-zygote'
+                '--no-zygote',
+                '--disable-features=IsolateOrigins,site-per-process', // Ahorro masivo de RAM
+                '--shm-size=3gb'
             ]
         }
     });
