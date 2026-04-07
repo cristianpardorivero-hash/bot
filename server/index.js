@@ -921,7 +921,14 @@ app.post('/send-messages', authenticate, async (req, res) => {
                 continue;
             }
 
-            let phone = String(row[actualPhoneColumn]).trim().replace(/\D/g, '');
+            // Normalización ROBUSTA de números chilenos
+            let phone = String(row[actualPhoneColumn] || '').trim().replace(/\D/g, '');
+            
+            // Lógica chilena: 56982026807 (11), 982026807 (9), 82026807 (8)
+            if (phone.length === 8) phone = '569' + phone;
+            else if (phone.length === 9 && phone.startsWith('9')) phone = '56' + phone;
+            else if (phone.length === 11 && phone.startsWith('562')) { /* Teléfono fijo Santiago, dejar igual */ }
+            else if (phone.length === 11 && !phone.startsWith('56')) phone = '56' + phone;
             
             if (phone.length < 7 || phone.length > 15) {
                 const errorMsg = `⚠️ Saltando número inválido (${phone}) por longitud.`;
@@ -929,10 +936,6 @@ app.post('/send-messages', authenticate, async (req, res) => {
                 io.emit('log', errorMsg);
                 io.emit('progress', { index: i, total: data.length, status: 'failed', error: 'Longitud inválida' });
                 continue;
-            }
-
-            if (phone.length === 9 && phone.startsWith('9')) {
-                phone = '56' + phone;
             }
 
             try {
@@ -946,30 +949,18 @@ app.post('/send-messages', authenticate, async (req, res) => {
 
                 const numberId = await Promise.race([numberIdPromise, timeoutPromise]).catch(e => {
                     console.error(`⚠️ Error/Timeout en getNumberId para ${phone}:`, e.message);
-                    io.emit('log', `⚠️ Timeout o error verificando ${phone}.`);
                     return null;
                 });
                 
-                if (!numberId) {
-                    const errorMsg = `❌ El número ${phone} NO está registrado en WhatsApp.`;
-                    console.warn(errorMsg);
-                    io.emit('log', errorMsg);
-                    io.emit('progress', {
-                        index: i,
-                        total: data.length,
-                        status: 'failed',
-                        phone: phone,
-                        error: 'El número no está registrado en WhatsApp.'
-                    });
-                    continue;
+                let target;
+                if (numberId) {
+                    target = numberId._serialized;
+                } else {
+                    target = `${phone}@c.us`;
+                    io.emit('log', `⚠️ ${phone} no validado, usando envío forzado.`);
                 }
-                phone = numberId._serialized;
-            } catch (err) {
-                console.error(`🔴 Error fatal verificando número ${phone}:`, err.message);
-                continue;
-            }
-
-            let message = messageTemplate.replace(/{{([^}]+)}}/g, (match, tag) => {
+                
+                let message = messageTemplate.replace(/{{([^}]+)}}/g, (match, tag) => {
                 const cleanTag = tag.trim().toLowerCase();
                 const exactKeys = {
                     'nombre': 'Nombre',
@@ -999,13 +990,12 @@ app.post('/send-messages', authenticate, async (req, res) => {
                 return match;
             });
 
-            try {
-                io.emit('log', `📤 Enviando a ${phone}...`);
-                await client.sendMessage(phone, message);
-                console.log(`✅ Mensaje enviado a: ${phone}`);
-                io.emit('log', `✅ Mensaje enviado exitosamente a ${phone}`);
-                
-                const getValue = (keys) => {
+            io.emit('log', `📤 Enviando a ${phone}...`);
+            await client.sendMessage(target, message);
+            console.log(`✅ Mensaje enviado a: ${phone}`);
+            io.emit('log', `✅ Mensaje enviado exitosamente a ${phone}`);
+            
+            const getValue = (keys) => {
                     const foundKey = Object.keys(row).find(k => 
                         keys.some(search => k.trim().toLowerCase().includes(search.toLowerCase()))
                     );
@@ -1098,14 +1088,17 @@ app.post('/send-manual', authenticate, async (req, res) => {
         else if (phone.length === 9 && phone.startsWith('9')) phone = '56' + phone;
 
         try {
+            let target;
             const numberId = await client.getNumberId(phone);
-            if (!numberId) {
-                const errorMsg = `❌ Número manual ${phone} no registrado en WhatsApp.`;
-                io.emit('log', errorMsg);
-                return res.status(404).send(errorMsg);
+            
+            if (numberId) {
+                target = numberId._serialized;
+            } else {
+                target = `${phone}@c.us`;
+                io.emit('log', `⚠️ Número manual ${phone} no validado, intentando envío forzado...`);
             }
 
-            await client.sendMessage(numberId._serialized, message);
+            await client.sendMessage(target, message);
             io.emit('log', `✅ Envío manual exitoso a ${phone}`);
 
             // Registro histórico en Firestore
