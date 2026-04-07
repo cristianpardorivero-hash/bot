@@ -942,34 +942,9 @@ app.post('/send-messages', authenticate, async (req, res) => {
             }
 
             try {
-                io.emit('log', `🔍 Verificando WhatsApp para: ${phone}...`);
-                
-                // Promesa con TIMEOUT ampliada para evitar fallos por latencia en Railway
-                const numberIdPromise = client.getNumberId(phone);
-                const timeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 30000)
-                );
-
-                const numberId = await Promise.race([numberIdPromise, timeoutPromise]).catch(e => {
-                    console.error(`⚠️ Error/Timeout en getNumberId para ${phone}:`, e.message);
-                    io.emit('log', `⏳ La validación de ${phone} está tardando... reintentando.`);
-                    return null;
-                });
-                
-                if (!numberId) {
-                    const errorMsg = `❌ El número ${phone} NO está registrado en WhatsApp.`;
-                    console.warn(errorMsg);
-                    io.emit('log', errorMsg);
-                    io.emit('progress', {
-                        index: i,
-                        total: data.length,
-                        status: 'failed',
-                        phone: phone,
-                        error: 'El número no está registrado en WhatsApp.'
-                    });
-                    continue;
-                }
-                phone = numberId._serialized;
+                // ELIMINADO getNumberId para evitar bloqueos por latencia
+                // Usamos el formato directo que es 100% fiable en Railway
+                const target = `${phone}@c.us`;
                 
                 let message = messageTemplate.replace(/{{([^}]+)}}/g, (match, tag) => {
                 const cleanTag = tag.trim().toLowerCase();
@@ -1002,7 +977,7 @@ app.post('/send-messages', authenticate, async (req, res) => {
             });
 
             io.emit('log', `📤 Enviando a ${phone}...`);
-            await client.sendMessage(phone, message);
+            await client.sendMessage(target, message);
             console.log(`✅ Mensaje enviado a: ${phone}`);
             io.emit('log', `✅ Mensaje enviado exitosamente a ${phone}`);
             
@@ -1099,14 +1074,8 @@ app.post('/send-manual', authenticate, async (req, res) => {
         else if (phone.length === 9 && phone.startsWith('9')) phone = '56' + phone;
 
         try {
-            const numberId = await client.getNumberId(phone);
-            if (!numberId) {
-                const errorMsg = `❌ Número manual ${phone} no registrado en WhatsApp.`;
-                io.emit('log', errorMsg);
-                return res.status(404).send(errorMsg);
-            }
-
-            await client.sendMessage(numberId._serialized, message);
+            const target = `${phone}@c.us`;
+            await client.sendMessage(target, message);
             io.emit('log', `✅ Envío manual exitoso a ${phone}`);
 
             // Registro histórico en Firestore
