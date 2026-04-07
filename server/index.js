@@ -285,14 +285,15 @@ function initializeWhatsApp() {
 
     client.on('message_create', async (msg) => {
         // Ignorar mensajes largos enviados por el bot para evitar bucles
-        if (msg.fromMe && msg.body.length > 20) return;
+        if (msg.fromMe && msg.body.length > 30) return;
 
         const numberOnly = msg.from.replace(/\D/g, '');
         const body = String(msg.body || '').trim();
 
-        // LOG DE DEPURACIÓN PARA EL DASHBOARD
+        // LOG DE DEPURACIÓN PARA EL DASHBOARD - Siempre registrar intentos de usuario
         if (!msg.fromMe) {
             io.emit('log', `📩 [DEBUG] Recibido de ${numberOnly}: "${body}"`);
+            console.log(`📩 Mensaje de ${numberOnly}: "${body}"`);
         }
 
         try {
@@ -311,7 +312,11 @@ function initializeWhatsApp() {
                 return cleanId.slice(-8) === numberOnly.slice(-8);
             });
 
-            if (isOption && match) {
+            // PRIORIDAD: Si el usuario ya está interactuando con Camelia, Camelia tiene el control.
+            // Si no hay charla activa con Camelia, y es una opción (1,2,3) que coincide con una campaña, procesar campaña.
+            const tieneCharlaActiva = conversacionesActivas[numberOnly] && conversacionesActivas[numberOnly].step !== 'INICIO';
+
+            if (isOption && match && !tieneCharlaActiva) {
                 let updated = false;
                 if (cleanBody === '1') {
                     sessions[match].status = 'Confirmada';
@@ -338,7 +343,6 @@ function initializeWhatsApp() {
             } else {
                 // 2. LOGICA DE CAMELIA (Texto libre o flujo interactivo)
                 const estaActiva = conversacionesActivas._config?.activa !== false;
-                const tieneCharlaActiva = conversacionesActivas[numberOnly];
 
                 if (estaActiva || tieneCharlaActiva) {
                     await handleCameliaFlow(msg, numberOnly);
@@ -535,8 +539,6 @@ function initializeWhatsApp() {
 
                 default:
                     delete conversacionesActivas[phone];
-                    saveSessions();
-                    break;
                     saveSessions();
                     break;
             }
