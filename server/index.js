@@ -1114,12 +1114,20 @@ app.post('/admin/update-user', authenticate, async (req, res) => {
 app.post('/whatsapp/reset', authenticate, async (req, res) => {
     try {
         // Verificar ADMIN
-        const callerUid = req.user.uid;
+        const user = req.user;
+        const callerUid = user.uid;
+        const callerEmail = user.email;
+        
         let callerDoc = await admin.firestore().collection('usuarios').doc(callerUid).get();
-        if (!callerDoc.exists) callerDoc = await admin.firestore().collection('usuarios').doc(req.user.email).get();
+        if (!callerDoc.exists && callerEmail) {
+            callerDoc = await admin.firestore().collection('usuarios').doc(callerEmail).get();
+        }
 
-        if (!callerDoc.exists || callerDoc.data().role !== 'ADMIN') {
-            return res.status(403).send('No autorizado.');
+        const role = callerDoc.exists ? String(callerDoc.data().role || '').toUpperCase() : 'NONE';
+
+        if (role !== 'ADMIN') {
+            console.warn(`🚫 Intento de reinicio fallido. Usuario: ${callerEmail}, Rol detectado: ${role}`);
+            return res.status(403).send(`No autorizado. Tu rol es ${role}.`);
         }
 
         console.log("♻️ Reinicio total solicitado...");
