@@ -91,22 +91,7 @@ const isOriginAllowed = (origin) => {
     return false;
 };
 
-// 1. Parche CORS v3 (Conectividad Total en Railway)
-app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    if (isOriginAllowed(origin)) {
-        res.header("Access-Control-Allow-Origin", origin);
-    }
-    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
-    res.header("Access-Control-Allow-Credentials", "true");
-    
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(204);
-    }
-    next();
-});
-
+// 1. Sistema de Seguridad y Conectividad (CORS Unificado)
 app.use(cors({
     origin: (origin, callback) => callback(null, isOriginAllowed(origin)),
     credentials: true,
