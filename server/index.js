@@ -487,6 +487,62 @@ app.get('/debug', (req, res) => {
     });
 });
 
+/**
+ * --- SISTEMA DE PLANTILLAS PERSISTENTES ---
+ * Permite guardar y gestionar diferentes mensajes según el tipo de campaña.
+ */
+
+// Obtener todas las plantillas
+app.get('/templates', authenticate, async (req, res) => {
+    try {
+        const snapshot = await admin.firestore().collection('templates').orderBy('updatedAt', 'desc').get();
+        const templates = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        res.json(templates);
+    } catch (error) {
+        console.error("Error al obtener plantillas:", error);
+        res.status(500).send("Error al obtener plantillas");
+    }
+});
+
+// Guardar o actualizar una plantilla
+app.post('/templates', authenticate, express.json(), async (req, res) => {
+    const { id, name, content } = req.body;
+    if (!name || !content) {
+        return res.status(400).send("Nombre y contenido son requeridos");
+    }
+
+    try {
+        const templateData = {
+            name,
+            content,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        };
+
+        if (id) {
+            await admin.firestore().collection('templates').doc(id).set(templateData, { merge: true });
+            res.json({ id, ...templateData, message: "Plantilla actualizada" });
+        } else {
+            const docRef = await admin.firestore().collection('templates').add(templateData);
+            res.json({ id: docRef.id, ...templateData, message: "Plantilla creada" });
+        }
+    } catch (error) {
+        console.error("Error al guardar plantilla:", error);
+        res.status(500).send("Error al guardar plantilla");
+    }
+});
+
+// Eliminar una plantilla
+app.delete('/templates/:id', authenticate, async (req, res) => {
+    const { id } = req.params;
+    try {
+        await admin.firestore().collection('templates').doc(id).delete();
+        res.send("Plantilla eliminada");
+    } catch (error) {
+        console.error("Error al eliminar plantilla:", error);
+        res.status(500).send("Error al eliminar plantilla");
+    }
+});
+
 
 
 // Shorten URLs using TinyURL

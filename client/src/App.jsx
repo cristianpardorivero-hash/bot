@@ -33,7 +33,10 @@ import {
   LifeBuoy,
   Power,
   ShieldCheck,
-  RotateCcw
+  RotateCcw,
+  Save,
+  Plus,
+  FileText
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
@@ -43,7 +46,14 @@ import AdminPanel from './components/AdminPanel';
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
 const AppContent = () => {
+  const [userRole, setUserRole] = useState(null);
   const { currentUser, userProfile, logout, loading } = useAuth();
+  
+  // --- SISTEMA DE PLANTILLAS ---
+  const [templates, setTemplates] = useState([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
   const [activeView, setActiveView] = useState('dashboard'); // 'dashboard' | 'admin'
   const [qr, setQr] = useState(null);
   const [ready, setReady] = useState(false);
@@ -66,6 +76,55 @@ const AppContent = () => {
     reconnectionAttempts: 5,
     reconnectionDelay: 1000,
   }), []);
+
+  const fetchTemplates = async () => {
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await axios.get(`${API_URL}/templates`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      setTemplates(response.data);
+    } catch (error) {
+      console.error('Error fetching templates:', error);
+    }
+  };
+
+  const saveTemplate = async () => {
+    if (!newTemplateName || !messageTemplate) return;
+    setIsSavingTemplate(true);
+    try {
+      const token = await currentUser.getIdToken();
+      await axios.post(`${API_URL}/templates`, {
+        name: newTemplateName,
+        content: messageTemplate
+      }, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      setNewTemplateName('');
+      fetchTemplates();
+      alert('Plantilla guardada correctamente.');
+    } catch (error) {
+      console.error('Error saving template:', error);
+      alert('Error al guardar la plantilla.');
+    } finally {
+      setIsSavingTemplate(false);
+    }
+  };
+
+  const deleteTemplate = async (id) => {
+    if (!window.confirm("¿Seguro que quieres eliminar esta plantilla?")) return;
+    try {
+      const token = await currentUser.getIdToken();
+      await axios.delete(`${API_URL}/templates/${id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      fetchTemplates();
+      if (selectedTemplateId === id) setSelectedTemplateId('');
+    } catch (error) {
+      console.error('Error deleting template:', error);
+      alert('Error al eliminar la plantilla.');
+    }
+  };
 
   const onDrop = useCallback(async (acceptedFiles) => {
     const file = acceptedFiles[0];
@@ -112,6 +171,10 @@ const AppContent = () => {
   useEffect(() => {
     if (socket.connected) {
       socket.emit('request_status');
+    }
+
+    if (currentUser) {
+      fetchTemplates();
     }
     socket.on('connect', () => {
       socket.emit('request_status');
@@ -171,8 +234,6 @@ const AppContent = () => {
         [data.id]: data.data ? data.data : { ...prev[data.id], status: data.status, lastUpdated: new Date().toISOString() }
       }));
     });
-
-
 
     return () => {
       socket.off('connect');
@@ -452,11 +513,89 @@ const AppContent = () => {
                 {/* LADO IZQUIERDO: CONFIGURACIÓN (Solo Admin) */}
                 {userProfile?.role === 'ADMIN' && (
                     <div className="rounded-[32px] bg-white p-6 shadow-sm ring-1 ring-slate-200 space-y-6">
-                        <h3 className="text-sm font-bold uppercase text-slate-500">3. Configuración de Mensaje</h3>
+                        <h3 className="text-sm font-bold uppercase text-slate-500 flex items-center gap-2">
+                            <Settings size={16} /> 3. Configuración de Mensaje
+                        </h3>
+                        
+                        {/* GESTIÓN DE PLANTILLAS */}
                         <div className="space-y-4">
-                            <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                                <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Plantilla del Mensaje</label>
-                                <textarea value={messageTemplate} onChange={e=>setMessageTemplate(e.target.value)} className="w-full rounded-xl bg-white p-4 font-mono text-xs ring-1 ring-slate-100 outline-none focus:ring-emerald-500 transition-all" rows={6} />
+                            <div className="flex items-center justify-between">
+                                <label className="text-xs font-bold text-slate-400 uppercase">Campañas Guardadas</label>
+                                <button 
+                                    onClick={() => {
+                                        setSelectedTemplateId('');
+                                        setNewTemplateName('');
+                                    }}
+                                    className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded-md transition-all flex items-center gap-1"
+                                >
+                                    <Plus size={10} /> Nueva
+                                </button>
+                            </div>
+                            
+                            <div className="flex flex-wrap gap-2">
+                                {templates.length === 0 ? (
+                                    <p className="text-[10px] text-slate-400 italic">No hay plantillas guardadas.</p>
+                                ) : (
+                                    templates.map(t => (
+                                        <div 
+                                            key={t.id} 
+                                            className={`group relative flex items-center gap-2 px-3 py-2 rounded-xl text-xs border transition-all cursor-pointer ${
+                                                selectedTemplateId === t.id 
+                                                ? 'bg-emerald-50 border-emerald-200 text-emerald-700 font-medium ring-1 ring-emerald-100' 
+                                                : 'bg-white border-slate-100 text-slate-600 hover:border-slate-300'
+                                            }`}
+                                            onClick={() => {
+                                                setSelectedTemplateId(t.id);
+                                                setMessageTemplate(t.content);
+                                                setNewTemplateName(t.name);
+                                            }}
+                                        >
+                                            <FileText size={12} className={selectedTemplateId === t.id ? 'text-emerald-500' : 'text-slate-400'} />
+                                            {t.name}
+                                            <button 
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    deleteTemplate(t.id);
+                                                }}
+                                                className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 transition-opacity"
+                                            >
+                                                <X size={10} />
+                                            </button>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+
+                            <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200 space-y-3">
+                                <div>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Nombre de la Campaña</label>
+                                    <div className="flex gap-2">
+                                        <input 
+                                            type="text" 
+                                            placeholder="Ej: Control Diabéticos..."
+                                            value={newTemplateName}
+                                            onChange={(e) => setNewTemplateName(e.target.value)}
+                                            className="flex-1 rounded-lg bg-white px-3 py-2 text-xs ring-1 ring-slate-100 focus:ring-emerald-500 outline-none transition-all"
+                                        />
+                                        <button 
+                                            onClick={saveTemplate}
+                                            disabled={isSavingTemplate || !newTemplateName || !messageTemplate}
+                                            className="px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold flex items-center gap-2 disabled:opacity-50 disabled:grayscale transition-all shadow-sm shadow-emerald-100"
+                                        >
+                                            <Save size={14} /> {isSavingTemplate ? 'Guardando...' : (selectedTemplateId ? 'Actualizar' : 'Guardar')}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Cuerpo del Mensaje</label>
+                                    <textarea 
+                                        value={messageTemplate} 
+                                        onChange={e=>setMessageTemplate(e.target.value)} 
+                                        className="w-full rounded-xl bg-white p-4 font-mono text-xs ring-1 ring-slate-100 outline-none focus:ring-emerald-500 transition-all" 
+                                        rows={6} 
+                                    />
+                                </div>
                             </div>
                             <div className="rounded-2xl bg-slate-900 p-5 ring-1 ring-slate-800">
                                 <label className="text-xs font-bold text-slate-500 uppercase mb-3 block">Vista Previa Real</label>
