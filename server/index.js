@@ -84,29 +84,32 @@ if (process.env.ALLOWED_ORIGINS) {
 }
 
 const isOriginAllowed = (origin) => {
-    if (!origin) return true; // Permitir local/herramientas
+    if (!origin) return true;
     if (ALLOWED_ORIGINS.includes(origin)) return true;
-    // Soporte ultra-permissivo para Railway y variaciones de protocolo
-    if (origin.endsWith('.railway.app')) return true;
+    // Regex robusto para Railway y variaciones
+    if (/^https?:\/\/.*\.railway\.app$/.test(origin)) return true;
     return false;
 };
 
-// 1. Unificar Capa de Seguridad (CORS)
+// 1. Parche CORS v3 (Conectividad Total en Railway)
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (isOriginAllowed(origin)) {
+        res.header("Access-Control-Allow-Origin", origin);
+    }
+    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+    res.header("Access-Control-Allow-Credentials", "true");
+    
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(204);
+    }
+    next();
+});
+
 app.use(cors({
-    origin: (origin, callback) => {
-        if (isOriginAllowed(origin)) {
-            callback(null, true);
-        } else {
-            console.warn(`🛑 ORIGEN RECHAZADO: [${origin}]`);
-            // En producción Railway, a veces el origin viene mal formado, 
-            // permitimos pasar pero logueamos para debug.
-            callback(null, true); 
-        }
-    },
-    methods: ["GET", "POST", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    origin: (origin, callback) => callback(null, isOriginAllowed(origin)),
     credentials: true,
-    preflightContinue: false,
     optionsSuccessStatus: 204
 }));
 
@@ -117,16 +120,10 @@ const server = http.createServer(app);
 // Middleware de archivos estáticos (Para producción en Railway)
 app.use(express.static(path.join(__dirname, '../client/dist')));
 
-// 2. Configuración Robusta de Socket.io (Sincronizada con CORS)
+// 2. Configuración Socket.io (Saturación de CORS para estabilidad)
 const io = new Server(server, {
     cors: {
-        origin: (origin, callback) => {
-            if (isOriginAllowed(origin)) {
-                callback(null, true);
-            } else {
-                callback(null, true); 
-            }
-        },
+        origin: (origin, callback) => callback(null, isOriginAllowed(origin)),
         methods: ["GET", "POST"],
         credentials: true,
         allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
