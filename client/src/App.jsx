@@ -28,6 +28,9 @@ import {
   Monitor,
   Trash2,
   AlertCircle,
+  AlertTriangle,
+  Info,
+  LifeBuoy,
   Power,
   ShieldCheck,
   RotateCcw
