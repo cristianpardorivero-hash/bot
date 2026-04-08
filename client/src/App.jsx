@@ -169,9 +169,7 @@ const AppContent = () => {
       }));
     });
 
-    socket.on('camelia_status', (active) => {
 
-    });
 
     return () => {
       socket.off('connect');
@@ -183,7 +181,7 @@ const AppContent = () => {
       socket.off('initial_sessions');
       socket.off('status_update');
       socket.off('whatsapp_status');
-      socket.off('camelia_status');
+
     };
   }, [socket]);
 

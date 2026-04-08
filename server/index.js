@@ -67,40 +67,83 @@ const authenticate = async (req, res, next) => {
 };
 
 const app = express();
-app.use(cors({
-    origin: (origin, callback) => {
-        const whiteList = [
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "https://botsome.up.railway.app",
-            "https://bot-production-d6f9.up.railway.app"
-        ];
-        if (!origin || whiteList.indexOf(origin) !== -1 || process.env.ALLOWED_ORIGINS) {
-            callback(null, true);
-        } else {
-            callback(new Error('No permitido por CORS'));
-        }
-    },
-    methods: ["GET", "POST", "DELETE", "OPTIONS"],
-    credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization"]
-}));
-app.use(express.json());
-
-const server = http.createServer(app);
+// --- SISTEMA DE SEGURIDAD Y CONECTIVIDAD (CORS v2) ---
 const ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://botsome.up.railway.app",
-    "https://bot-production-d6f9.up.railway.app",
-    `http://${require('os').hostname()}:5173`
+    "https://bot-production-d6f9.up.railway.app"
 ];
 
+// Fusión dinámica con variables de entorno
+if (process.env.ALLOWED_ORIGINS) {
+    process.env.ALLOWED_ORIGINS.split(',').forEach(o => {
+        const trimmed = o.trim();
+        if (trimmed && !ALLOWED_ORIGINS.includes(trimmed)) ALLOWED_ORIGINS.push(trimmed);
+    });
+}
+
+const isOriginAllowed = (origin) => {
+    if (!origin) return true; // Permitir local/herramientas
+    if (ALLOWED_ORIGINS.includes(origin)) return true;
+    // Soporte para variaciones de Railway (wildcard seguro)
+    if (origin.endsWith('.railway.app')) return true;
+    return false;
+};
+
+// 1. Middleware de Cabeceras Manuales (Fallback para Railway)
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (isOriginAllowed(origin)) {
+        res.header("Access-Control-Allow-Origin", origin);
+    }
+    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+    res.header("Access-Control-Allow-Credentials", "true");
+    
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    next();
+});
+
+// 2. Middleware CORS de Express (Segunda Capa)
+app.use(cors({
+    origin: (origin, callback) => {
+        if (isOriginAllowed(origin)) {
+            callback(null, true);
+        } else {
+            console.warn(`🛑 ORIGEN RECHAZADO POR CORS: [${origin}]`);
+            // Permitimos pasar pero logueamos para identificar el dominio exacto en Railway
+            callback(null, true); 
+        }
+    },
+    credentials: true
+}));
+
+app.use(express.json());
+
+const server = http.createServer(app);
+
+// 3. Configuración Robusta de Socket.io
 const io = new Server(server, {
     cors: {
-        origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ALLOWED_ORIGINS,
-        methods: ["GET", "POST"]
-    }
+        origin: (origin, callback) => {
+            if (isOriginAllowed(origin)) {
+                callback(null, true);
+            } else {
+                console.warn(`🛑 SOCKET.IO RECHAZADO: [${origin}]`);
+                callback(null, true); 
+            }
+        },
+        methods: ["GET", "POST"],
+        credentials: true,
+        allowedHeaders: ["content-type", "authorization", "x-requested-with"]
+    },
+    transports: ["websocket", "polling"],
+    allowEIO3: true,
+    pingTimeout: 60000,
+    pingInterval: 25000
 });
 
 // Diagnóstico de errores globales
@@ -119,11 +162,9 @@ let currentQr = null;
 
 // Peristent sessions management (Using absolute path for reliability)
 const SESSIONS_FILE = path.resolve(__dirname, 'sessions.json');
-const CAMELIA_FILE = path.resolve(__dirname, 'camelia_sessions.json');
+
 let sessions = {};
-let conversacionesActivas = { 
-    _config: { activa: true } // Configuración persistente de Camelia
-};
+
 let incomingLogs = []; // CAJA NEGRA: Para ver mensajes reales en /debug
 
 function loadSessions() {
@@ -133,16 +174,7 @@ function loadSessions() {
             sessions = JSON.parse(data);
             console.log(`✅ Base de datos (Campañas) cargada: ${Object.keys(sessions).length} registros.`);
         }
-        if (fs.existsSync(CAMELIA_FILE)) {
-            const cameliaData = fs.readFileSync(CAMELIA_FILE, 'utf8');
-            const parsedCamelia = JSON.parse(cameliaData);
-            // Asegurar que _config siempre exista
-            conversacionesActivas = { 
-                _config: { activa: true }, 
-                ...parsedCamelia 
-            };
-            console.log(`🌸 Camelia: ${Object.keys(conversacionesActivas).length - 1} conversaciones. Estado: ${conversacionesActivas._config.activa ? 'ACTIVA' : 'INACTIVA'}`);
-        }
+
     } catch (e) {
         console.error("❌ Error cargando sesiones:", e.message);
     }
@@ -151,7 +183,7 @@ function loadSessions() {
 function saveSessions() {
     try {
         fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2), 'utf8');
-        fs.writeFileSync(CAMELIA_FILE, JSON.stringify(conversacionesActivas, null, 2), 'utf8');
+
     } catch (e) {
         console.error("❌ Error guardando sesiones:", e.message);
     }
@@ -181,24 +213,29 @@ function initializeWhatsApp() {
     const chromePaths = [
         process.env.PUPPETEER_EXECUTABLE_PATH, 
         process.env.CHROME_PATH,
+        '/usr/bin/google-chrome-stable',
         '/usr/bin/google-chrome',
         '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
         'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
         'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
     ];
     
     let executablePath = chromePaths.find(p => p && fs.existsSync(p));
+    console.log(`🔍 Motor de búsqueda Chrome: Usando ${executablePath || 'Puppeteer Default'}`);
 
     client = new Client({
         authStrategy: new LocalAuth(),
+        authTimeoutMs: 0, // Desactiva timeout de autenticación para evitar cierres prematuros
+        qrMaxRetries: 0,   // Intenta generar el QR indefinidamente
         webVersionCache: {
             type: 'remote',
-            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1018978711.html',
         },
         puppeteer: {
-            headless: 'new',
+            headless: true, // Modo más estable para entornos sin servidor gráfico
             executablePath: executablePath || undefined,
-            protocolTimeout: 120000, 
+            protocolTimeout: 180000, // Aumentado a 3 min para conexiones lentas en Railway
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -208,7 +245,8 @@ function initializeWhatsApp() {
                 '--no-first-run',
                 '--no-zygote',
                 '--disable-gpu',
-                '--disable-software-rasterizer'
+                '--disable-software-rasterizer',
+                '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
             ]
         }
     });
@@ -333,90 +371,11 @@ function initializeWhatsApp() {
                     message: `Respuesta procesada: ${sessions[match].status} (${sessions[match].nombre})`
                 });
             }
-        } else {
-            // --- LOGICA DE CAMELIA ---
-            // Solo procesamos si Camelia está ACTIVA o si el usuario ya tiene una charla iniciada
-            const estaActiva = conversacionesActivas._config?.activa !== false;
-            const tieneCharlaActiva = conversacionesActivas[numberOnly];
-
-            if (estaActiva || tieneCharlaActiva) {
-                await handleCameliaFlow(msg, numberOnly);
-            } else {
-                console.log(`⏸️ Camelia está en silencio para ${numberOnly}`);
-            }
         }
     });
 
-    // Función principal para el flujo conversacional de Camelia
-    async function handleCameliaFlow(msg, phone) {
-        const estado = conversacionesActivas[phone] || { step: 'INICIO' };
-        const body = msg.body.trim();
-
-        try {
-            switch(estado.step) {
-                case 'INICIO':
-                    conversacionesActivas[phone] = { step: 'MENU_PRINCIPAL' };
-                    await msg.reply('🌸 *Hola, soy Camelia*, su asistente virtual del Hospital de Curepto.\n\n¿En qué puedo ayudarle hoy?\n\n*1.* Solicitar una hora médica.\n*2.* Cambiar o reagendar una hora existente.\n*3.* Consultar horarios.');
-                    saveSessions();
-                    break;
-
-                case 'MENU_PRINCIPAL':
-                    if (body === '1' || body === '2') {
-                        conversacionesActivas[phone] = { 
-                            step: 'ESPERANDO_PROFESIONAL', 
-                            tipo: body === '1' ? 'Solicitud' : 'Cambio' 
-                        };
-                        await msg.reply('Entendido. Por favor, escriba el nombre o la especialidad del *Profesional* con quien desea atenderse.');
-                    } else if (body === '3') {
-                        await msg.reply('Nuestro horario de atención general es de lunes a viernes, de 08:00 a 17:00 horas. Para consultas específicas, puede llamar al 75 256 5688.');
-                        // Mantenemos el paso o reseteamos
-                    } else {
-                        await msg.reply('Por favor, seleccione una opción válida (1, 2 o 3).');
-                    }
-                    saveSessions();
-                    break;
-
-                case 'ESPERANDO_PROFESIONAL':
-                    conversacionesActivas[phone].profesional = body;
-                    conversacionesActivas[phone].step = 'ESPERANDO_MOTIVO';
-                    await msg.reply(`Perfecto. Ahora, indique brevemente el *Motivo* de su consulta para el profesional ${body}.`);
-                    saveSessions();
-                    break;
-
-                case 'ESPERANDO_MOTIVO':
-                    const motivo = body;
-                    const tipo = conversacionesActivas[phone].tipo;
-                    const profesional = conversacionesActivas[phone].profesional;
-
-                    // GUARDAR EN FIRESTORE
-                    await admin.firestore().collection('solicitudes_camelia').add({
-                        paciente_telefono: phone,
-                        tipo: tipo,
-                        profesional: profesional,
-                        motivo: motivo,
-                        estado: 'PENDIENTE',
-                        fecha: admin.firestore.FieldValue.serverTimestamp()
-                    });
-
-                    await msg.reply(`✅ *Muchas gracias.* Su solicitud para ${profesional} ha sido recibida y está siendo procesada.\n\nUn funcionario se pondrá en contacto con usted a la brevedad para confirmar la fecha y hora final. ¡Que tenga un buen día!`);
-                    
-                    io.emit('log', `🌸 Nueva solicitud de ${phone} para ${profesional} (Pendiente en Dashboard).`);
-                    
-                    // Finalizar flujo
-                    delete conversacionesActivas[phone];
-                    saveSessions();
-                    break;
-
-                default:
-                    delete conversacionesActivas[phone];
-                    saveSessions();
-                    break;
-            }
-        } catch (error) {
-            console.error("❌ Error en flujo Camelia:", error.message);
-        }
-    }
-
+    console.log('--- Intentando inicializar WhatsApp Client... ---');
+    
     io.emit('whatsapp_status', { state: 'INITIALIZING', message: 'Iniciando motor de WhatsApp...' });
     
     const initTimeout = setTimeout(() => {
@@ -426,7 +385,6 @@ function initializeWhatsApp() {
         }
     }, 120000);
 
-    console.log('--- Intentando inicializar WhatsApp Client... ---');
     client.initialize().catch(err => {
         console.error('❌ Falló el arranque de WhatsApp:', err.message);
         clearTimeout(initTimeout);
@@ -457,16 +415,10 @@ io.on('connection', (socket) => {
     }
     // Send current sessions on connect
     socket.emit('initial_sessions', sessions);
-    socket.emit('camelia_status', conversacionesActivas._config?.activa !== false);
+
 
     // Toggle para Camelia
-    socket.on('toggle_camelia', (newState) => {
-        if (!conversacionesActivas._config) conversacionesActivas._config = {};
-        conversacionesActivas._config.activa = newState;
-        saveSessions();
-        io.emit('camelia_status', newState);
-        io.emit('log', `🌸 Camelia ha sido ${newState ? 'ACTIVADA' : 'DESACTIVADA (Silencio)'} por un administrador.`);
-    });
+
 
     // Permite al frontend solicitar el estado si sufre una carrera (race condition) al recargar la página
     socket.on('request_status', () => {
@@ -515,53 +467,7 @@ app.get('/debug', (req, res) => {
     });
 });
 
-// NUEVO: Reinicio de Sesión WhatsApp (Solo para Administradores)
-app.post('/whatsapp/reset', authenticate, async (req, res) => {
-    try {
-        console.log(`⚠️ Solicitud de REINICIO de WhatsApp recibida de: ${req.user.email}`);
-        
-        // 1. Notificar a todos los clientes del inicio del reset
-        io.emit('whatsapp_status', { state: 'DISCONNECTED', message: 'Reiniciando motor de WhatsApp...' });
-        io.emit('ready', false);
 
-        // 2. Destruir cliente actual si existe
-        if (client) {
-            try {
-                await client.destroy();
-                console.log("🛑 Cliente WhatsApp destruido.");
-            } catch (destroyError) {
-                console.warn("⚠️ Error al destruir cliente (ya podría estar cerrado):", destroyError.message);
-            }
-        }
-
-        // 3. Limpiar variables de estado
-        clientReady = false;
-        currentQr = null;
-
-        // 4. Eliminar carpeta de autenticación para forzar nuevo QR
-        const authPath = path.resolve(__dirname, '.wwebjs_auth');
-        if (fs.existsSync(authPath)) {
-            try {
-                fs.rmSync(authPath, { recursive: true, force: true });
-                console.log("🗑️ Carpeta de autenticación eliminada con éxito.");
-            } catch (rmError) {
-                console.error("❌ Error eliminando carpeta de auth:", rmError.message);
-            }
-        }
-
-        // 5. Pequeño retardo para asegurar que el sistema de archivos libere los recursos
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // 6. Re-inicializar el motor
-        console.log("🔄 Re-inicializando motor de WhatsApp...");
-        initializeWhatsApp();
-
-        res.json({ success: true, message: "Reinicio iniciado correctamente." });
-    } catch (error) {
-        console.error("🔥 Error crítico en reset de WhatsApp:", error);
-        res.status(500).json({ error: "Error interno al reiniciar la sesión." });
-    }
-});
 
 // Shorten URLs using TinyURL
 async function shortenURL(url) {
@@ -1109,6 +1015,25 @@ app.post('/admin/update-user', authenticate, async (req, res) => {
     }
 });
 
+// Función robusta para eliminar la carpeta de sesión en Windows (maneja bloqueos de archivos)
+async function deleteAuthFolder(folderPath, retries = 5, delay = 1000) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            if (fs.existsSync(folderPath)) {
+                fs.rmSync(folderPath, { recursive: true, force: true });
+                console.log(`✅ [Intento ${i+1}] Carpeta de sesión eliminada exitosamente.`);
+                return true;
+            }
+            return true; // Ya no existe
+        } catch (e) {
+            console.warn(`⚠️ [Intento ${i+1}] No se pudo eliminar la carpeta de sesión (${e.message}). Reintentando en ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+    console.error("❌ Fallaron todos los intentos de eliminar la carpeta de sesión. Es posible que Chromium siga abierto.");
+    return false;
+}
+
 // NUEVO: Reinicio completo de WhatsApp (Borra sesión y pide nuevo QR)
 app.post('/whatsapp/reset', authenticate, async (req, res) => {
     try {
@@ -1121,39 +1046,49 @@ app.post('/whatsapp/reset', authenticate, async (req, res) => {
             return res.status(403).send('No autorizado.');
         }
 
-        console.log("♻️ Reinicio total solicitado...");
+        console.log(`♻️ Reinicio total solicitado por ${req.user.email}...`);
         io.emit('log', "♻️ Iniciando reinicio del motor de WhatsApp...");
         
         clientReady = false;
+        currentQr = null;
         io.emit('ready', false);
+        io.emit('whatsapp_status', { state: 'DISCONNECTED', message: 'Cerrando sesión y limpiando archivos...' });
 
+        // 1. Destruir cliente con timeout de seguridad
         if (client) {
             try {
-                await client.destroy();
+                await Promise.race([
+                    client.destroy(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_DESTROY')), 10000))
+                ]);
                 console.log("✅ Cliente destruido.");
             } catch (e) {
-                console.error("⚠️ Error destruyendo cliente:", e.message);
+                console.error("⚠️ Error o Timeout destruyendo cliente:", e.message);
             }
         }
 
-        // Borrar carpeta de sesión para forzar nuevo QR
+        // 2. Pequeño respiro para que el SO suelte los archivos
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // 3. Borrar carpeta de sesión de forma robusta
         const authPath = path.resolve(__dirname, '.wwebjs_auth');
-        if (fs.existsSync(authPath)) {
-            try {
-                fs.rmSync(authPath, { recursive: true, force: true });
-                console.log("🗑️ Carpeta de sesión eliminada.");
-            } catch (e) {
-                console.error("❌ Error borrando carpeta de sesión:", e.message);
-            }
+        const deleted = await deleteAuthFolder(authPath);
+
+        if (!deleted) {
+            return res.status(500).json({ 
+                success: false, 
+                message: "No se pudo limpiar la sesión antigua. Por favor, intenta de nuevo en unos segundos." 
+            });
         }
 
-        res.json({ success: true, message: "Reinicio en progreso..." });
+        // 4. Responder al cliente antes de re-inicializar
+        res.json({ success: true, message: "Sesión limpiada. Generando nuevo QR..." });
 
-        // Dar un pequeño tiempo para que los archivos se liberen y re-inicializar
+        // 5. Re-inicializar tras una breve pausa
         setTimeout(() => {
             console.log("🚀 Re-inicializando WhatsApp...");
             initializeWhatsApp();
-        }, 3000);
+        }, 2000);
 
     } catch (error) {
         console.error('Error en reset:', error);
