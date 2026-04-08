@@ -440,13 +440,33 @@ app.get('/sessions', (req, res) => {
     res.json(sessions);
 });
 
-app.delete('/sessions', (req, res) => {
+// Purgado TOTAL (Sólo Admin debería usarlo, aunque aquí manejamos la lógica del servidor)
+app.delete('/sessions', authenticate, (req, res) => {
     sessions = {};
     saveSessions();
     res.send('Sessions cleared');
 });
 
-app.delete('/sessions/:id', (req, res) => {
+// NUEVO: Purgado SELECTIVO de confirmados (Accesible para todos los autenticados)
+app.delete('/sessions/confirmed', authenticate, (req, res) => {
+    const originalCount = Object.keys(sessions).length;
+    
+    // Filtrar sesiones: Mantener solo las que NO están confirmadas
+    const remainingSessions = {};
+    Object.entries(sessions).forEach(([id, session]) => {
+        if (session.status !== 'Confirmada') {
+            remainingSessions[id] = session;
+        }
+    });
+
+    sessions = remainingSessions;
+    saveSessions();
+    
+    const deletedCount = originalCount - Object.keys(sessions).length;
+    res.send(`Se han purgado ${deletedCount} sesiones confirmadas.`);
+});
+
+app.delete('/sessions/:id', authenticate, (req, res) => {
     const { id } = req.params;
     if (sessions[id]) {
         delete sessions[id];

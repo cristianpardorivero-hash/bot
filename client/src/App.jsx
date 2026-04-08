@@ -289,7 +289,7 @@ const AppContent = () => {
   };
 
   const clearSessions = async () => {
-    if (!window.confirm('¿Estás seguro de limpiar todo el historial?')) return;
+    if (!window.confirm('⚠️ ¿Estás seguro de LIMPIAR TODO el radar? Esta acción no se puede deshacer.')) return;
     try {
       const token = await currentUser.getIdToken();
       await fetch(`${API_URL}/sessions`, { 
@@ -297,6 +297,27 @@ const AppContent = () => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       setSessions({});
+    } catch (e) { console.error(e); }
+  };
+
+  const clearConfirmedSessions = async () => {
+    if (!window.confirm('¿Deseas limpiar solo los pacientes ya CONFIRMADOS del monitor?')) return;
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/sessions/confirmed`, { 
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        // Refrescar localmente filtrando confirmados
+        setSessions(prev => {
+          const updated = {};
+          Object.entries(prev).forEach(([id, s]) => {
+            if (s.status !== 'Confirmada') updated[id] = s;
+          });
+          return updated;
+        });
+      }
     } catch (e) { console.error(e); }
   };
 
@@ -446,10 +467,12 @@ const AppContent = () => {
                           <textarea value={messageTemplate} onChange={e=>setMessageTemplate(e.target.value)} className="w-full rounded-2xl bg-white p-4 font-mono text-xs ring-1 ring-slate-200 outline-none" rows={8} />
                         </div>
                       )}
-                      <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-slate-200">
-                        <h3 className="text-lg font-semibold mb-4">Vista Previa</h3>
-                        <div className="rounded-2xl bg-slate-900 p-4 text-xs leading-6 text-white border-l-4 border-emerald-500 whitespace-pre-wrap">{previewMessage}</div>
-                      </div>
+                      {userProfile?.role === 'ADMIN' && (
+                        <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-slate-200">
+                          <h3 className="text-lg font-semibold mb-4">Vista Previa</h3>
+                          <div className="rounded-2xl bg-slate-900 p-4 text-xs leading-6 text-white border-l-4 border-emerald-500 whitespace-pre-wrap">{previewMessage}</div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -469,22 +492,39 @@ const AppContent = () => {
                   )}
                 </div>
 
-                <div className="rounded-[32px] bg-slate-950 p-6 text-white shadow-xl">
-                  <h2 className="text-lg font-bold mb-3 flex items-center gap-2 mb-4"><Monitor size={16} /> Logs de Envío</h2>
-                  <div className="h-64 overflow-y-auto rounded-xl bg-black/40 p-3 font-mono text-[10px] leading-5 text-slate-300">
-                    {logs.length > 0 ? logs.map((log, i) => (
-                      <p key={i} className="flex gap-2"><span className="text-slate-600">[{log.time}]</span><span className={log.status === 'error' ? 'text-red-400' : 'text-emerald-400'}>{log.text}</span></p>
-                    )) : <p className="italic text-slate-600">Sin actividad...</p>}
-                  </div>
-                </div>
+                  {userProfile?.role === 'ADMIN' && (
+                    <div className="rounded-[32px] bg-slate-950 p-6 text-white shadow-xl">
+                      <h2 className="text-lg font-bold mb-3 flex items-center gap-2 mb-4"><Monitor size={16} /> Logs de Envío</h2>
+                      <div className="h-64 overflow-y-auto rounded-xl bg-black/40 p-3 font-mono text-[10px] leading-5 text-slate-300">
+                        {logs.length > 0 ? logs.map((log, i) => (
+                          <p key={i} className="flex gap-2"><span className="text-slate-600">[{log.time}]</span><span className={log.status === 'error' ? 'text-red-400' : 'text-emerald-400'}>{log.text}</span></p>
+                        )) : <p className="italic text-slate-600">Sin actividad...</p>}
+                      </div>
+                    </div>
+                  )}
               </aside>
             </main>
 
             <section className="rounded-[32px] bg-white p-6 shadow-sm ring-1 ring-slate-200">
-               <div className="flex items-center justify-between mb-6">
-                 <h2 className="text-2xl font-bold">Monitor de Respuestas</h2>
-                 <button onClick={clearSessions} className="text-[10px] font-bold text-red-500 border p-2 rounded-lg">Purger Radar</button>
-               </div>
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-bold">Monitor de Respuestas</h2>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={clearConfirmedSessions} 
+                      className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 p-2 rounded-lg hover:bg-emerald-100 transition-all"
+                    >
+                      Purgar Confirmados
+                    </button>
+                    {userProfile?.role === 'ADMIN' && (
+                      <button 
+                        onClick={clearSessions} 
+                        className="text-[10px] font-bold text-red-500 bg-red-50 border border-red-200 p-2 rounded-lg hover:bg-red-100 transition-all"
+                      >
+                        Purgar Radar
+                      </button>
+                    )}
+                  </div>
+                </div>
                <div className="overflow-x-auto rounded-2xl border border-slate-100">
                  <table className="w-full text-left text-[10px]">
                     <thead className="bg-slate-50 text-slate-500 font-bold uppercase">
