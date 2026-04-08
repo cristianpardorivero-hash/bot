@@ -374,7 +374,8 @@ const AppContent = () => {
         </header>
 
         {activeView === 'dashboard' && (
-          <>
+          <div className="space-y-6">
+            {/* FASE 0: ESTADÍSTICAS RÁPIDAS */}
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-slate-200">
                   <p className="text-sm text-slate-500">Estado Enlace</p>
@@ -394,204 +395,257 @@ const AppContent = () => {
                 </div>
             </section>
 
-            <main className="grid gap-6 xl:grid-cols-[1.4fr_0.95fr]">
-              <section className="space-y-6">
+            {/* FASE 1: PREPARACIÓN (ENLACE Y DATOS) */}
+            <div className="grid gap-6 lg:grid-cols-2">
                 <div className="rounded-[32px] bg-white p-6 shadow-sm ring-1 ring-slate-200">
-                  <h2 className="text-2xl font-bold mb-6">Módulo de Campaña</h2>
-                  <div className="grid gap-6 lg:grid-cols-2">
-                    <div className="space-y-4">
-                      <div className="rounded-[28px] bg-white p-6 shadow-sm ring-1 ring-slate-200">
-                        <div className="flex items-center justify-between gap-4 mb-6">
-                           <h3 className="text-sm font-bold uppercase text-slate-500">Vincular Dispositivo</h3>
-                           <div className="flex gap-2">
-                             <button 
-                                onClick={() => socket.emit('request_status')}
-                                title="Refrescar estado de conexión"
-                                className="p-2 bg-slate-50 hover:bg-slate-100 text-slate-400 rounded-xl transition-all"
-                             >
+                    <div className="flex items-center justify-between gap-4 mb-6">
+                        <h3 className="text-sm font-bold uppercase text-slate-500">1. Vincular Dispositivo</h3>
+                        <div className="flex gap-2">
+                            <button onClick={() => socket.emit('request_status')} title="Refrescar estado" className="p-2 bg-slate-50 hover:bg-slate-100 text-slate-400 rounded-xl transition-all">
                                 <RefreshCw size={14} />
-                             </button>
-                             {userProfile?.role === 'ADMIN' && (
-                               <button 
-                                  onClick={handleResetWhatsApp}
-                                  title="Forzar Inicio / Reiniciar Motor"
-                                  className="p-2 bg-red-50 hover:bg-red-100 text-red-400 rounded-xl transition-all flex items-center gap-2 text-[10px] font-bold"
-                               >
-                                  <Power size={14} /> REINICIAR
-                               </button>
-                             )}
-                           </div>
+                            </button>
+                            {userProfile?.role === 'ADMIN' && (
+                                <button onClick={handleResetWhatsApp} title="Reiniciar Motor" className="p-2 bg-red-50 hover:bg-red-100 text-red-500 rounded-xl transition-all flex items-center gap-2 text-[10px] font-bold">
+                                    <Power size={14} /> REINICIAR
+                                </button>
+                            )}
                         </div>
-                        {ready ? (
-                          <div className="flex flex-col items-center py-6 bg-emerald-50 rounded-2xl border border-emerald-100">
+                    </div>
+                    {ready ? (
+                        <div className="flex flex-col items-center py-6 bg-emerald-50 rounded-2xl border border-emerald-100">
                             <ShieldCheck className="text-emerald-500 mb-3" size={48} />
-                            <p className="text-sm font-bold text-emerald-800">Conectado</p>
-                          </div>
-                        ) : qr ? (
-                          <div className="flex flex-col items-center">
-                            <img src={qr} alt="QR" className="w-40 h-40 mb-4 border-2 p-2 rounded-2xl" />
-                            <p className="text-xs font-bold text-slate-900 animate-pulse">Escanea el código QR</p>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col items-center py-10">
+                            <p className="text-sm font-bold text-emerald-800">WhatsApp Conectado</p>
+                        </div>
+                    ) : qr ? (
+                        <div className="flex flex-col items-center py-2">
+                            <img src={qr} alt="QR" className="w-40 h-40 mb-4 border-2 p-2 rounded-2xl bg-white shadow-inner" />
+                            <p className="text-xs font-bold text-slate-900 animate-pulse">Escanea el código QR para iniciar</p>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-center py-10">
                             <RefreshCw className="animate-spin text-slate-300 mb-4" size={32} />
-                            <p className="text-xs text-slate-400 italic">{whatsappStatus.message}</p>
-                          </div>
+                            <p className="text-xs text-slate-400 italic">Iniciando motor...</p>
+                        </div>
+                    )}
+                </div>
+
+                <div className="rounded-[32px] bg-white p-6 shadow-sm ring-1 ring-slate-200 flex flex-col justify-center">
+                    <h3 className="text-sm font-bold uppercase text-slate-500 mb-6">2. Carga de Destinatarios</h3>
+                    <div {...getRootProps()} className="flex-1 rounded-[28px] border-2 border-dashed border-slate-200 bg-slate-50 p-8 text-center flex flex-col items-center justify-center cursor-pointer hover:bg-slate-100 transition-all">
+                        <input {...getInputProps()} />
+                        <Upload className="mb-4 text-emerald-500" size={40} />
+                        <h3 className="text-lg font-bold text-slate-700">Importar Excel</h3>
+                        <p className="text-sm text-slate-500 mt-2">
+                            {excelData.length > 0 ? (
+                                <span className="text-emerald-600 font-bold">✅ {excelData.length} contactos cargados exitosamente.</span>
+                            ) : 'Arrastra tu archivo aquí o haz clic para buscar'}
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {/* FASE 2: CONFIGURACIÓN Y ACCIÓN */}
+            <div className={`grid gap-6 ${userProfile?.role === 'ADMIN' ? 'lg:grid-cols-2' : 'grid-cols-1'}`}>
+                {/* LADO IZQUIERDO: CONFIGURACIÓN (Solo Admin) */}
+                {userProfile?.role === 'ADMIN' && (
+                    <div className="rounded-[32px] bg-white p-6 shadow-sm ring-1 ring-slate-200 space-y-6">
+                        <h3 className="text-sm font-bold uppercase text-slate-500">3. Configuración de Mensaje</h3>
+                        <div className="space-y-4">
+                            <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                                <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Plantilla del Mensaje</label>
+                                <textarea value={messageTemplate} onChange={e=>setMessageTemplate(e.target.value)} className="w-full rounded-xl bg-white p-4 font-mono text-xs ring-1 ring-slate-100 outline-none focus:ring-emerald-500 transition-all" rows={6} />
+                            </div>
+                            <div className="rounded-2xl bg-slate-900 p-5 ring-1 ring-slate-800">
+                                <label className="text-xs font-bold text-slate-500 uppercase mb-3 block">Vista Previa Real</label>
+                                <div className="text-xs leading-6 text-white border-l-4 border-emerald-500 pl-4 whitespace-pre-wrap">{previewMessage}</div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* LADO DERECHO: LANZAMIENTO Y LOGS */}
+                <div className="space-y-6">
+                    <div className="rounded-[32px] bg-white p-8 shadow-md ring-1 ring-slate-200 border-b-4 border-emerald-500">
+                        <h3 className="text-sm font-bold uppercase text-slate-500 mb-6">4. Ejecución de Campaña</h3>
+                        <button 
+                            onClick={handleSendMessages} 
+                            disabled={isSending || !ready || excelData.length === 0} 
+                            className={`w-full rounded-2xl py-5 font-black text-xl tracking-tight transition-all shadow-lg flex items-center justify-center gap-3 ${
+                                isSending || !ready || excelData.length === 0 
+                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none' 
+                                : 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white hover:scale-[1.02] hover:shadow-emerald-200 active:scale-95'
+                            }`}
+                        >
+                            {isSending ? (
+                                <><RefreshCw className="animate-spin" size={24} /> PROCESANDO... </>
+                            ) : (
+                                <><Send size={24} /> LANZAR CAMPAÑA AHORA</>
+                            )}
+                        </button>
+                        
+                        {isSending && (
+                            <div className="mt-8 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                <div className="flex justify-between text-xs font-bold mb-2 text-slate-600">
+                                    <span>Progreso General</span>
+                                    <span className="text-emerald-600">{Math.round((progress.index/progress.total)*100)}%</span>
+                                </div>
+                                <div className="w-full bg-slate-200 h-3 rounded-full overflow-hidden shadow-inner">
+                                    <div className="bg-gradient-to-r from-emerald-400 to-emerald-600 h-full transition-all duration-500" style={{width:`${(progress.index/progress.total)*100}%`}}></div>
+                                </div>
+                                <p className="text-[10px] text-center mt-3 text-slate-400 font-medium">Procesando {progress.index} de {progress.total} contactos</p>
+                            </div>
                         )}
-                      </div>
 
-                      <div className="rounded-[28px] border-2 border-dashed border-slate-200 bg-slate-50 p-6 text-center">
-                        <div {...getRootProps()} className="cursor-pointer">
-                          <input {...getInputProps()} />
-                          <Upload className="mx-auto mb-4 text-slate-400" size={32} />
-                          <h3 className="text-lg font-semibold">Base de Datos</h3>
-                          <p className="text-sm text-slate-500 mt-1">{excelData.length > 0 ? `✅ ${excelData.length} contactos.` : 'Sube tu Excel aquí'}</p>
-                        </div>
-                      </div>
-
-                      {/* ENVÍO MANUAL */}
-                      <div className="rounded-[28px] bg-white p-6 shadow-sm ring-1 ring-slate-200">
-                         <h3 className="text-sm font-bold uppercase text-slate-500 mb-4">Envío Manual</h3>
-                         <div className="space-y-3">
-                            <input type="text" placeholder="Teléfono..." value={manualPhone} onChange={e => setManualPhone(e.target.value)} className="w-full rounded-xl bg-slate-50 p-3 text-sm ring-1 ring-slate-200 outline-none" />
-                            <textarea placeholder="Mensaje..." value={manualMessage} onChange={e => setManualMessage(e.target.value)} className="w-full rounded-xl bg-slate-50 p-3 text-sm ring-1 ring-slate-200 outline-none" rows={2} />
-                            <button onClick={handleManualSend} disabled={isManualSending || !ready} className="w-full rounded-xl py-3 text-sm font-bold bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-slate-200">Enviar</button>
-                         </div>
-                      </div>
+                        {!ready && (
+                            <div className="mt-4 p-3 bg-amber-50 rounded-xl border border-amber-100 flex items-center gap-3 text-amber-700">
+                                <AlertTriangle size={18} />
+                                <p className="text-xs font-bold">Debes vincular WhatsApp antes de lanzar.</p>
+                            </div>
+                        )}
+                        {ready && excelData.length === 0 && (
+                            <div className="mt-4 p-3 bg-blue-50 rounded-xl border border-blue-100 flex items-center gap-3 text-blue-700">
+                                <Info size={18} />
+                                <p className="text-xs font-bold">Sube un archivo Excel para habilitar el botón.</p>
+                            </div>
+                        )}
                     </div>
 
-                    <div className="space-y-4">
-                      {userProfile?.role === 'ADMIN' && (
-                        <div className="rounded-[28px] bg-slate-50 p-5 ring-1 ring-slate-200">
-                          <h3 className="text-lg font-semibold mb-4">Plantilla</h3>
-                          <textarea value={messageTemplate} onChange={e=>setMessageTemplate(e.target.value)} className="w-full rounded-2xl bg-white p-4 font-mono text-xs ring-1 ring-slate-200 outline-none" rows={8} />
+                    {userProfile?.role === 'ADMIN' && (
+                        <div className="rounded-[32px] bg-slate-950 p-6 text-white shadow-2xl overflow-hidden relative">
+                            <div className="absolute top-0 right-0 p-4 opacity-10"><Monitor size={80} /></div>
+                            <h3 className="text-sm font-bold uppercase text-slate-500 mb-4 flex items-center gap-2">
+                                <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                                Monitor de Tráfico (Logs)
+                            </h3>
+                            <div className="h-48 overflow-y-auto font-mono text-[10px] space-y-2 scrollbar-hide">
+                                {logs.length > 0 ? logs.map((log, i) => (
+                                    <div key={i} className="flex gap-3 border-l border-slate-800 pl-3">
+                                        <span className="text-slate-600 shrink-0">{log.time}</span>
+                                        <span className={log.status === 'error' ? 'text-red-400' : 'text-emerald-400'}>{log.text}</span>
+                                    </div>
+                                )) : <p className="italic text-slate-700">Esperando actividad...</p>}
+                            </div>
                         </div>
-                      )}
-                      {userProfile?.role === 'ADMIN' && (
-                        <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-slate-200">
-                          <h3 className="text-lg font-semibold mb-4">Vista Previa</h3>
-                          <div className="rounded-2xl bg-slate-900 p-4 text-xs leading-6 text-white border-l-4 border-emerald-500 whitespace-pre-wrap">{previewMessage}</div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                    )}
                 </div>
-              </section>
+            </div>
 
-              <aside className="space-y-6">
-                <div className="rounded-[32px] bg-white p-6 shadow-sm ring-1 ring-slate-200">
-                  <h2 className="text-2xl font-bold mb-4">Lanzamiento</h2>
-                  <button onClick={handleSendMessages} disabled={isSending || !ready || excelData.length === 0} className={`w-full rounded-2xl py-4 font-bold text-white transition ${isSending || !ready || excelData.length === 0 ? 'bg-slate-300' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
-                    {isSending ? "ENVIANDO..." : "LANZAR CAMPAÑA"}
-                  </button>
-                  {isSending && (
-                    <div className="mt-4">
-                      <div className="flex justify-between text-[10px] mb-1 text-slate-500"><span>Progreso: {progress.index}/{progress.total}</span><span>{Math.round((progress.index/progress.total)*100)}%</span></div>
-                      <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden"><div className="bg-emerald-500 h-full transition-all" style={{width:`${(progress.index/progress.total)*100}%`}}></div></div>
-                    </div>
-                  )}
-                </div>
-
-                  {userProfile?.role === 'ADMIN' && (
-                    <div className="rounded-[32px] bg-slate-950 p-6 text-white shadow-xl">
-                      <h2 className="text-lg font-bold mb-3 flex items-center gap-2 mb-4"><Monitor size={16} /> Logs de Envío</h2>
-                      <div className="h-64 overflow-y-auto rounded-xl bg-black/40 p-3 font-mono text-[10px] leading-5 text-slate-300">
-                        {logs.length > 0 ? logs.map((log, i) => (
-                          <p key={i} className="flex gap-2"><span className="text-slate-600">[{log.time}]</span><span className={log.status === 'error' ? 'text-red-400' : 'text-emerald-400'}>{log.text}</span></p>
-                        )) : <p className="italic text-slate-600">Sin actividad...</p>}
-                      </div>
-                    </div>
-                  )}
-              </aside>
-            </main>
-
+            {/* FASE 3: MONITOREO DE RESPUESTAS */}
             <section className="rounded-[32px] bg-white p-6 shadow-sm ring-1 ring-slate-200">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-2xl font-bold">Monitor de Respuestas</h2>
-                  <div className="flex gap-2">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                  <div>
+                    <h2 className="text-2xl font-bold text-slate-800">Monitor de Respuestas en Tiempo Real</h2>
+                    <p className="text-sm text-slate-500 mt-1">Sigue el estado de las confirmaciones del Hospital de Curepto</p>
+                  </div>
+                  <div className="flex gap-2 bg-slate-50 p-1.5 rounded-2xl ring-1 ring-slate-200">
                     <button 
                       onClick={clearConfirmedSessions} 
-                      className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 p-2 rounded-lg hover:bg-emerald-100 transition-all"
+                      className="px-4 py-2 text-xs font-bold text-emerald-700 bg-white shadow-sm rounded-xl hover:bg-emerald-50 transition-all border border-emerald-100"
                     >
-                      Purgar Confirmados
+                      Limpiar Confirmados
                     </button>
                     {userProfile?.role === 'ADMIN' && (
                       <button 
                         onClick={clearSessions} 
-                        className="text-[10px] font-bold text-red-500 bg-red-50 border border-red-200 p-2 rounded-lg hover:bg-red-100 transition-all"
+                        className="px-4 py-2 text-xs font-bold text-red-600 hover:text-red-700 rounded-xl transition-all"
                       >
-                        Purgar Radar
+                        Vaciar Todo
                       </button>
                     )}
                   </div>
                 </div>
-               <div className="overflow-x-auto rounded-2xl border border-slate-100">
-                 <table className="w-full text-left text-[10px]">
-                    <thead className="bg-slate-50 text-slate-500 font-bold uppercase">
+
+                <div className="overflow-x-auto rounded-2xl border border-slate-100">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50/50 text-slate-400 font-bold uppercase text-[10px] tracking-wider">
                       <tr>
-                        <th className="px-4 py-3">Paciente</th>
-                        <th className="px-4 py-3">Teléfono</th>
-                        <th className="px-4 py-3">Cita</th>
-                        <th className="px-4 py-3">Agenda</th>
-                        <th className="px-4 py-3">Profesional</th>
-                        <th className="px-4 py-3">Estado</th>
-                        <th className="px-4 py-3 text-right">Acciones</th>
+                        <th className="px-6 py-4">Paciente</th>
+                        <th className="px-6 py-4">Teléfono</th>
+                        <th className="px-6 py-4">Cita</th>
+                        <th className="px-6 py-4">Agenda / Profesional</th>
+                        <th className="px-6 py-4">Estado</th>
+                        <th className="px-6 py-4 text-right">Acciones</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y">
-                      {Object.entries(sessions).map(([id, session]) => (
-                        <tr key={id} className="hover:bg-slate-50 transition-colors">
-                          <td className="px-4 py-3">
-                            <div className="font-bold text-slate-900">{session.Nombre || session.nombre}</div>
-                            <div className="text-[9px] text-slate-400">Actualizado: {session.lastUpdated ? new Date(session.lastUpdated).toLocaleTimeString() : '--'}</div>
+                    <tbody className="divide-y divide-slate-100">
+                      {Object.entries(sessions).length > 0 ? Object.entries(sessions).map(([id, session]) => (
+                        <tr key={id} className="hover:bg-slate-50/80 transition-all group">
+                          <td className="px-6 py-4">
+                            <div className="font-bold text-slate-700 text-base">{session.Nombre || session.nombre}</div>
+                            <div className="text-[10px] text-slate-400 font-medium">✨ Último contacto: {session.lastUpdated ? new Date(session.lastUpdated).toLocaleTimeString() : '--'}</div>
                           </td>
-                          <td className="px-4 py-3 text-slate-500 font-mono">{id}</td>
-                          <td className="px-4 py-3">
-                            <div className="font-semibold text-indigo-600">{session.fecha || '--'}</div>
-                            <div className="text-slate-400">{session.hora || '--'}</div>
+                          <td className="px-6 py-4 text-slate-500 font-mono text-xs">{id}</td>
+                          <td className="px-6 py-4">
+                            <div className="font-bold text-indigo-600">{session.fecha || '--'}</div>
+                            <div className="text-slate-400 text-xs">{session.hora || '--'}</div>
                           </td>
-                          <td className="px-4 py-3 max-w-[150px] truncate" title={session.motivo}>{session.motivo || 'Sin motivo'}</td>
-                          <td className="px-4 py-3 leading-tight">{session.profesional || 'No asignado'}</td>
-                          <td className="px-4 py-3">
-                            <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
-                              session.status === 'Confirmada' ? 'bg-emerald-100 text-emerald-700' : 
-                              session.status === 'Cancelada' ? 'bg-red-100 text-red-700' : 
-                              session.status === 'Reagendar' ? 'bg-amber-100 text-amber-700' :
-                              session.status === 'Reenviado' ? 'bg-indigo-100 text-indigo-700' :
-                              'bg-blue-100 text-blue-700'
+                          <td className="px-6 py-4">
+                            <div className="text-slate-700 font-medium truncate max-w-[180px]" title={session.motivo}>{session.motivo || 'Sin motivo'}</div>
+                            <div className="text-slate-400 text-xs">{session.profesional || 'No asignado'}</div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`inline-flex items-center px-3 py-1 rounded-full font-bold text-[10px] uppercase tracking-wide border-2 ${
+                              session.status === 'Confirmada' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 
+                              session.status === 'Cancelada' ? 'bg-red-50 text-red-700 border-red-100' : 
+                              session.status === 'Reagendar' ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                              session.status === 'Reenviado' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' :
+                              'bg-blue-50 text-blue-700 border-blue-100'
                             }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full mr-2 ${
+                                session.status === 'Confirmada' ? 'bg-emerald-500' : 
+                                session.status === 'Cancelada' ? 'bg-red-500' : 
+                                'bg-current'
+                              }`} />
                               {session.status}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-right">
-                            <div className="flex justify-end gap-2">
-                              <button 
-                                onClick={() => handleResendIndividual(id)} 
-                                disabled={!ready}
-                                className="p-1.5 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-                                title="Reenviar mensaje"
-                              >
-                                <RotateCcw size={14}/>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button onClick={() => handleResendIndividual(id)} disabled={!ready} className="p-2 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl" title="Reenviar">
+                                <RotateCcw size={16}/>
                               </button>
-                              <button 
-                                onClick={() => deleteIndividualSession(id)} 
-                                className="p-1.5 text-red-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                                title="Eliminar de monitor"
-                              >
-                                <Trash2 size={14}/>
+                              <button onClick={() => deleteIndividualSession(id)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl" title="Eliminar">
+                                <Trash2 size={16}/>
                               </button>
                             </div>
                           </td>
                         </tr>
-                      ))}
+                      )) : (
+                        <tr>
+                            <td colSpan="6" className="px-6 py-12 text-center text-slate-300 italic font-medium">Nadie ha respondido aún. Las respuestas aparecerán aquí automáticamente.</td>
+                        </tr>
+                      )}
                     </tbody>
-                 </table>
-               </div>
+                  </table>
+                </div>
             </section>
-          </>
+
+            {/* FASE EXTRAS: ACCIONES SECUNDARIAS */}
+            <div className="flex flex-col md:flex-row gap-6">
+                <div className="md:w-1/3 rounded-[32px] bg-white p-6 shadow-sm ring-1 ring-slate-200">
+                    <h3 className="text-sm font-bold uppercase text-slate-500 mb-4">Envío Manual Rápido</h3>
+                    <div className="space-y-3">
+                        <input type="text" placeholder="Teléfono (+569...)" value={manualPhone} onChange={e => setManualPhone(e.target.value)} className="w-full rounded-xl bg-slate-50 p-3 text-sm ring-1 ring-slate-200 outline-none focus:ring-2 focus:ring-emerald-500" />
+                        <textarea placeholder="Mensaje personalizado..." value={manualMessage} onChange={e => setManualMessage(e.target.value)} className="w-full rounded-xl bg-slate-50 p-3 text-sm ring-1 ring-slate-200 outline-none focus:ring-2 focus:ring-emerald-500" rows={2} />
+                        <button onClick={handleManualSend} disabled={isManualSending || !ready} className="w-full rounded-xl py-3 text-sm font-bold bg-slate-900 text-white hover:bg-black disabled:bg-slate-200 transition-all">
+                            {isManualSending ? 'Enviando...' : 'Enviar Individual'}
+                        </button>
+                    </div>
+                </div>
+                
+                <div className="md:flex-1 rounded-[32px] bg-emerald-900 p-8 text-white flex items-center justify-between overflow-hidden relative">
+                    <div className="relative z-10">
+                        <h3 className="text-xl font-bold mb-2">¿Necesitas ayuda técnica?</h3>
+                        <p className="text-emerald-200 text-sm max-w-md">El motor de WhatsApp utiliza inteligencia artificial para detectar las respuestas de los pacientes. Si notas algo extraño, prueba reiniciar el motor desde el panel superior.</p>
+                    </div>
+                    <LifeBuoy className="opacity-10 absolute -right-4 -bottom-4" size={120} />
+                </div>
+            </div>
+          </div>
         )}
 
         {activeView === 'admin' && <AdminPanel />}
+
 
 
       </div>
