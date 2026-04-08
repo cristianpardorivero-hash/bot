@@ -125,6 +125,9 @@ app.use(express.json());
 
 const server = http.createServer(app);
 
+// Middleware de archivos estáticos (Para producción en Railway)
+app.use(express.static(path.join(__dirname, '../client/dist')));
+
 // 3. Configuración Robusta de Socket.io
 const io = new Server(server, {
     cors: {
@@ -297,6 +300,62 @@ function initializeWhatsApp() {
         console.error('❌ WhatsApp Auth Failure:', msg);
         io.emit('whatsapp_status', { state: 'AUTH_FAILURE', message: 'Error de autenticación. Escanea el QR de nuevo.' });
     });
+
+    // SISTEMA DE ESCUCHA DE RESPUESTAS (CONFIRMACIONES)
+    client.on('message', async (msg) => {
+        try {
+            const chat = await msg.getChat();
+            if (chat.isGroup) return; // Ignorar grupos
+
+            const from = msg.from.split('@')[0];
+            const text = msg.body.trim().toLowerCase();
+            
+            // Palabras clave de confirmación
+            const confirmationKeywords = ['si', 'sí', 'confirmar', 'confirmo', 'asistire', 'asistir', 'ok', 'vale', 'listo'];
+            const isConfirmation = confirmationKeywords.some(keyword => text.includes(keyword));
+
+            if (isConfirmation) {
+                console.log(`✅ Respuesta de confirmación detectada de ${from}: "${msg.body}"`);
+                io.emit('log', `✅ El paciente ${from} ha CONFIRMADO su cita vía chat.`);
+
+                // 1. Actualizar sessions.json (Cache local)
+                let foundInSessions = false;
+                for (const phone in sessions) {
+                    if (phone.includes(from)) {
+                        sessions[phone].estado = 'Confirmado';
+                        foundInSessions = true;
+                    }
+                }
+                if (foundInSessions) saveSessions();
+
+                // 2. Actualizar Firestore
+                const snapshot = await admin.firestore().collection('historial_envios')
+                    .where('telefono', '>=', from.slice(-8))
+                    .orderBy('telefono')
+                    .limit(20)
+                    .get();
+
+                const updates = [];
+                snapshot.forEach(doc => {
+                    if (doc.data().telefono.includes(from)) {
+                        updates.push(doc.ref.update({ 
+                            estado: 'Confirmado',
+                            confirmadoAt: admin.firestore.FieldValue.serverTimestamp()
+                        }));
+                    }
+                });
+                await Promise.all(updates);
+
+                // 3. Auto-respuesta opcional
+                await msg.reply('✅ Muchas gracias. Su cita ha sido confirmada satisfactoriamente.');
+                
+                io.emit('session_update', sessions);
+            }
+        } catch (error) {
+            console.error('Error procesando mensaje entrante:', error);
+        }
+    });
+
 
     client.on('disconnected', (reason) => {
         console.log('Disconnected', reason);
@@ -826,25 +885,28 @@ app.post('/send-messages', authenticate, async (req, res) => {
                     try {
                         const numberIdPromise = client.getNumberId(phone);
                         const timeoutPromise = new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 15000) // Timeout más corto para intentos rápidos
+                            setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 15000)
                         );
 
                         numberId = await Promise.race([numberIdPromise, timeoutPromise]);
                         if (numberId) break; 
-                        break; 
+                        
+                        if (attempt < MAX_VERIFY_RETRIES) {
+                             io.emit('log', `⏳ Reintentando verificación (${attempt}/${MAX_VERIFY_RETRIES}) para ${phone}...`);
+                        }
                     } catch (e) {
+                        io.emit('log', `⚠️ Timeout o error verificando ${phone} (Intento ${attempt}).`);
                         if (attempt < MAX_VERIFY_RETRIES) continue;
-                        throw e;
+                        // Si es el último intento y falló, dejamos que numberId sea null para ir al fallback
                     }
                 }
                 
-                // FALLBACK: Si no se pudo verificar (timeout o false) pero tiene 11 dígitos, 
-                // intentamos envío directo (útil para números no guardados en agenda)
+                // FALLBACK: Si no se pudo verificar pero es un móvil chileno (11 dígitos), intentamos envío directo
                 if (!numberId && phone.length === 11) {
                     io.emit('log', `⚠️ Verificación fallida para ${phone}. Intentando envío forzado (Fallback)...`);
                     phone = `${phone}@c.us`;
                 } else if (!numberId) {
-                    const errorMsg = `❌ El número ${phone} NO es válido para WhatsApp.`;
+                    const errorMsg = `❌ El número ${phone} NO está registrado en WhatsApp y no cumple formato para fallback.`;
                     console.warn(errorMsg);
                     io.emit('log', errorMsg);
                     
@@ -857,10 +919,11 @@ app.post('/send-messages', authenticate, async (req, res) => {
                     continue;
                 } else {
                     phone = numberId._serialized;
+                    consecutiveTimeouts = 0; // Resetear contador al tener éxito
                 }
             } catch (err) {
-                // Si falla incluso con fallback
-                console.error(`🔴 Error verificando número ${phone}:`, err.message);
+                console.error(`🔴 Error crítico en bucle de verificación para ${phone}:`, err.message);
+                io.emit('log', `🔴 Error inesperado procesando ${phone}: ${err.message}`);
                 continue;
             }
 
@@ -1225,6 +1288,12 @@ app.post('/whatsapp/reset', authenticate, async (req, res) => {
         res.status(500).send('Error interno en el reinicio.');
     }
 });
+
+// Ruta comodín para SPA (Catch-all) - DEBE IR AL FINAL DE LAS RUTAS
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../client/dist/index.html'));
+});
+
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
