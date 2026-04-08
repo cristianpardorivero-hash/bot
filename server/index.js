@@ -86,39 +86,28 @@ if (process.env.ALLOWED_ORIGINS) {
 const isOriginAllowed = (origin) => {
     if (!origin) return true; // Permitir local/herramientas
     if (ALLOWED_ORIGINS.includes(origin)) return true;
-    // Soporte para variaciones de Railway (wildcard seguro)
+    // Soporte ultra-permissivo para Railway y variaciones de protocolo
     if (origin.endsWith('.railway.app')) return true;
     return false;
 };
 
-// 1. Middleware de Cabeceras Manuales (Fallback para Railway)
-app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    if (isOriginAllowed(origin)) {
-        res.header("Access-Control-Allow-Origin", origin);
-    }
-    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
-    res.header("Access-Control-Allow-Credentials", "true");
-    
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(200);
-    }
-    next();
-});
-
-// 2. Middleware CORS de Express (Segunda Capa)
+// 1. Unificar Capa de Seguridad (CORS)
 app.use(cors({
     origin: (origin, callback) => {
         if (isOriginAllowed(origin)) {
             callback(null, true);
         } else {
-            console.warn(`🛑 ORIGEN RECHAZADO POR CORS: [${origin}]`);
-            // Permitimos pasar pero logueamos para identificar el dominio exacto en Railway
+            console.warn(`🛑 ORIGEN RECHAZADO: [${origin}]`);
+            // En producción Railway, a veces el origin viene mal formado, 
+            // permitimos pasar pero logueamos para debug.
             callback(null, true); 
         }
     },
-    credentials: true
+    methods: ["GET", "POST", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    credentials: true,
+    preflightContinue: false,
+    optionsSuccessStatus: 204
 }));
 
 app.use(express.json());
@@ -128,20 +117,19 @@ const server = http.createServer(app);
 // Middleware de archivos estáticos (Para producción en Railway)
 app.use(express.static(path.join(__dirname, '../client/dist')));
 
-// 3. Configuración Robusta de Socket.io
+// 2. Configuración Robusta de Socket.io (Sincronizada con CORS)
 const io = new Server(server, {
     cors: {
         origin: (origin, callback) => {
             if (isOriginAllowed(origin)) {
                 callback(null, true);
             } else {
-                console.warn(`🛑 SOCKET.IO RECHAZADO: [${origin}]`);
                 callback(null, true); 
             }
         },
         methods: ["GET", "POST"],
         credentials: true,
-        allowedHeaders: ["content-type", "authorization", "x-requested-with"]
+        allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
     },
     transports: ["websocket", "polling"],
     allowEIO3: true,
