@@ -748,10 +748,19 @@ app.post('/send-messages', authenticate, async (req, res) => {
         io.emit('log', `🚀 Iniciando envío a ${data.length} pacientes...`);
         io.emit('progress', { index: -1, total: data.length });
 
+        let consecutiveTimeouts = 0;
+
         for (let i = 0; i < data.length; i++) {
             const row = data[i];
             console.log(`\n🔍 --- PROCESANDO REGISTRO ${i+1} ---`);
             
+            // Verificación preventiva de salud del cliente
+            if (!clientReady) {
+                const fatalMsg = "❌ El cliente de WhatsApp se desconectó durante el proceso.";
+                io.emit('log', fatalMsg);
+                break;
+            }
+
             const actualPhoneColumn = row['Celular'] ? 'Celular' : (row[phoneColumn] ? phoneColumn : null);
             
             if (!actualPhoneColumn) {
@@ -779,34 +788,60 @@ app.post('/send-messages', authenticate, async (req, res) => {
             try {
                 io.emit('log', `🔍 Verificando WhatsApp para: ${phone}...`);
                 
-                // Promesa con TIMEOUT para evitar que se cuelgue el bucle
-                const numberIdPromise = client.getNumberId(phone);
-                const timeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 15000)
-                );
+                let numberId = null;
+                const MAX_VERIFY_RETRIES = 2;
 
-                const numberId = await Promise.race([numberIdPromise, timeoutPromise]).catch(e => {
-                    console.error(`⚠️ Error/Timeout en getNumberId para ${phone}:`, e.message);
-                    io.emit('log', `⚠️ Timeout o error verificando ${phone}.`);
-                    return null;
-                });
+                for (let attempt = 1; attempt <= MAX_VERIFY_RETRIES; attempt++) {
+                    try {
+                        // Promesa con TIMEOUT EXTENDIDO (45s) para mayor estabilidad
+                        const numberIdPromise = client.getNumberId(phone);
+                        const timeoutPromise = new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 45000)
+                        );
+
+                        numberId = await Promise.race([numberIdPromise, timeoutPromise]);
+                        if (numberId) {
+                            consecutiveTimeouts = 0; // Resetear contador si tiene éxito
+                            break; 
+                        }
+                        
+                        // Si no es timeout pero no devuelve ID, el número probablemente no existe
+                        break; 
+                    } catch (e) {
+                        if (e.message === 'TIMEOUT_BROWSER' && attempt < MAX_VERIFY_RETRIES) {
+                            io.emit('log', `⏳ Reintentando verificación (${attempt}/${MAX_VERIFY_RETRIES}) para ${phone}...`);
+                            continue;
+                        }
+                        throw e; // Propagar error si fallaron los reintentos
+                    }
+                }
                 
                 if (!numberId) {
-                    const errorMsg = `❌ El número ${phone} NO está registrado en WhatsApp.`;
+                    const errorMsg = `❌ El número ${phone} NO está registrado en WhatsApp o dio timeout.`;
                     console.warn(errorMsg);
                     io.emit('log', errorMsg);
+                    
+                    consecutiveTimeouts++;
+                    if (consecutiveTimeouts >= 5) {
+                        const criticalMsg = "🚨 DETECCIÓN DE FALLO MASIVO: Demasiados timeouts seguidos. El envío se ha detenido por seguridad.";
+                        io.emit('log', criticalMsg);
+                        io.emit('whatsapp_status', { state: 'ERROR', message: "Envío detenido por fallos de red." });
+                        break;
+                    }
+
                     io.emit('progress', {
                         index: i,
                         total: data.length,
                         status: 'failed',
                         phone: phone,
-                        error: 'El número no está registrado en WhatsApp.'
+                        error: 'Verificación fallida.'
                     });
                     continue;
                 }
                 phone = numberId._serialized;
             } catch (err) {
-                console.error(`🔴 Error fatal verificando número ${phone}:`, err.message);
+                console.error(`🔴 Error crítico verificando número ${phone}:`, err.message);
+                io.emit('log', `⚠️ Error verificando ${phone}: ${err.message}`);
                 continue;
             }
 
