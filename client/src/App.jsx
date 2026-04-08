@@ -603,7 +603,7 @@ const AppContent = () => {
                             </span>
                           </td>
                           <td className="px-6 py-4 text-right">
-                            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex justify-end gap-1 transition-all">
                               <button onClick={() => handleResendIndividual(id)} disabled={!ready} className="p-2 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl" title="Reenviar">
                                 <RotateCcw size={16}/>
                               </button>
