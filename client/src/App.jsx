@@ -36,7 +36,8 @@ import {
   RotateCcw,
   Save,
   Plus,
-  FileText
+  FileText,
+  X
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
