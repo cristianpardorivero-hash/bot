@@ -157,7 +157,9 @@ process.on('uncaughtException', (err) => {
 const upload = multer({ dest: 'uploads/' });
 
 let client;
+// Variables de estado global
 let clientReady = false;
+let stopCampaign = false; // Nueva bandera para control de interrupción
 let currentQr = null;
 
 // Peristent sessions management (Using absolute path for reliability)
@@ -729,6 +731,13 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     }
 });
 
+// Endpoint para detener una campaña en curso
+app.post('/stop-campaign', authenticate, (req, res) => {
+    stopCampaign = true;
+    console.log("🛑 Solicitud de detención de campaña recibida.");
+    res.send({ message: 'Señal de detención enviada.' });
+});
+
 app.post('/send-messages', authenticate, async (req, res) => {
     try {
         const { data, phoneColumn, messageTemplate, delay = 2000 } = req.body;
@@ -743,8 +752,9 @@ app.post('/send-messages', authenticate, async (req, res) => {
         }
 
         res.send('Processing started');
-        const responsableEmail = req.user.email; // Captura segura antes del bucle
+        const responsableEmail = req.user.email; 
         
+        stopCampaign = false; // Resetear bandera al iniciar
         io.emit('log', `🚀 Iniciando envío a ${data.length} pacientes...`);
         io.emit('progress', { index: -1, total: data.length });
 
@@ -752,6 +762,15 @@ app.post('/send-messages', authenticate, async (req, res) => {
 
         for (let i = 0; i < data.length; i++) {
             const row = data[i];
+
+            // 1. Verificar si el usuario pidió detener la campaña
+            if (stopCampaign) {
+                const stopMsg = "🛑 Campaña cancelada por el usuario.";
+                console.log(stopMsg);
+                io.emit('log', stopMsg);
+                break; 
+            }
+
             console.log(`\n🔍 --- PROCESANDO REGISTRO ${i+1} ---`);
             
             // Verificación preventiva de salud del cliente
@@ -773,16 +792,28 @@ app.post('/send-messages', authenticate, async (req, res) => {
 
             let phone = String(row[actualPhoneColumn]).trim().replace(/\D/g, '');
             
-            if (phone.length < 7 || phone.length > 15) {
+            // NORMALIZACIÓN ROBUSTA (Evitar doble 569)
+            if (phone.length === 8) {
+                // Formato: 92150337 (Falta 569) -> 569 + 92150337? No, 8 dígitos suele ser XXXXXXXX. 
+                // En Chile son 9 dígitos total. Si tiene 8, asumimos que falta el 9 inicial y el 56.
+                phone = '569' + phone;
+            } else if (phone.length === 9) {
+                if (phone.startsWith('9')) {
+                    phone = '56' + phone;
+                }
+            } else if (phone.length === 11 && phone.startsWith('569')) {
+                // Formato correcto 569XXXXXXXX, no tocamos nada
+            } else if (phone.length > 11 && phone.startsWith('56569')) {
+                // Corregir error común de duplicación accidental de código de país
+                phone = phone.substring(2);
+            }
+
+            if (phone.length < 10) {
                 const errorMsg = `⚠️ Saltando número inválido (${phone}) por longitud.`;
                 console.warn(errorMsg);
                 io.emit('log', errorMsg);
                 io.emit('progress', { index: i, total: data.length, status: 'failed', error: 'Longitud inválida' });
                 continue;
-            }
-
-            if (phone.length === 9 && phone.startsWith('9')) {
-                phone = '56' + phone;
             }
 
             try {
@@ -793,55 +824,43 @@ app.post('/send-messages', authenticate, async (req, res) => {
 
                 for (let attempt = 1; attempt <= MAX_VERIFY_RETRIES; attempt++) {
                     try {
-                        // Promesa con TIMEOUT EXTENDIDO (45s) para mayor estabilidad
                         const numberIdPromise = client.getNumberId(phone);
                         const timeoutPromise = new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 45000)
+                            setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 15000) // Timeout más corto para intentos rápidos
                         );
 
                         numberId = await Promise.race([numberIdPromise, timeoutPromise]);
-                        if (numberId) {
-                            consecutiveTimeouts = 0; // Resetear contador si tiene éxito
-                            break; 
-                        }
-                        
-                        // Si no es timeout pero no devuelve ID, el número probablemente no existe
+                        if (numberId) break; 
                         break; 
                     } catch (e) {
-                        if (e.message === 'TIMEOUT_BROWSER' && attempt < MAX_VERIFY_RETRIES) {
-                            io.emit('log', `⏳ Reintentando verificación (${attempt}/${MAX_VERIFY_RETRIES}) para ${phone}...`);
-                            continue;
-                        }
-                        throw e; // Propagar error si fallaron los reintentos
+                        if (attempt < MAX_VERIFY_RETRIES) continue;
+                        throw e;
                     }
                 }
                 
-                if (!numberId) {
-                    const errorMsg = `❌ El número ${phone} NO está registrado en WhatsApp o dio timeout.`;
+                // FALLBACK: Si no se pudo verificar (timeout o false) pero tiene 11 dígitos, 
+                // intentamos envío directo (útil para números no guardados en agenda)
+                if (!numberId && phone.length === 11) {
+                    io.emit('log', `⚠️ Verificación fallida para ${phone}. Intentando envío forzado (Fallback)...`);
+                    phone = `${phone}@c.us`;
+                } else if (!numberId) {
+                    const errorMsg = `❌ El número ${phone} NO es válido para WhatsApp.`;
                     console.warn(errorMsg);
                     io.emit('log', errorMsg);
                     
                     consecutiveTimeouts++;
                     if (consecutiveTimeouts >= 5) {
-                        const criticalMsg = "🚨 DETECCIÓN DE FALLO MASIVO: Demasiados timeouts seguidos. El envío se ha detenido por seguridad.";
+                        const criticalMsg = "🚨 DETECCIÓN DE FALLO MASIVO: Deteniendo proceso por seguridad.";
                         io.emit('log', criticalMsg);
-                        io.emit('whatsapp_status', { state: 'ERROR', message: "Envío detenido por fallos de red." });
                         break;
                     }
-
-                    io.emit('progress', {
-                        index: i,
-                        total: data.length,
-                        status: 'failed',
-                        phone: phone,
-                        error: 'Verificación fallida.'
-                    });
                     continue;
+                } else {
+                    phone = numberId._serialized;
                 }
-                phone = numberId._serialized;
             } catch (err) {
-                console.error(`🔴 Error crítico verificando número ${phone}:`, err.message);
-                io.emit('log', `⚠️ Error verificando ${phone}: ${err.message}`);
+                // Si falla incluso con fallback
+                console.error(`🔴 Error verificando número ${phone}:`, err.message);
                 continue;
             }
 

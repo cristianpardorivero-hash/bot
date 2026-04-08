@@ -334,15 +334,15 @@ const AppContent = () => {
   };
 
   const handleSendMessages = async () => {
-    if (!excelData || excelData.length === 0 || !currentUser) return;
+    if (excelData.length === 0) return;
     setIsSending(true);
-    setLogs([]);
     try {
       const token = await currentUser.getIdToken();
       await axios.post(`${API_URL}/send-messages`, {
         data: excelData,
+        phoneColumn: 'Celular',
         messageTemplate: messageTemplate,
-        delay
+        delay: 3000
       }, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -350,6 +350,19 @@ const AppContent = () => {
       console.error('Error sending messages:', error);
       alert('Error al enviar los mensajes.');
       setIsSending(false);
+    }
+  };
+
+  const handleStopCampaign = async () => {
+    if (!window.confirm('🚨 ¿Estás seguro de que deseas CANCELAR el envío actual? Se detendrá después del mensaje en curso.')) return;
+    try {
+      const token = await currentUser.getIdToken();
+      await axios.post(`${API_URL}/stop-campaign`, {}, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+    } catch (error) {
+      console.error('Error stopping campaign:', error);
+      alert('No se pudo detener la campaña.');
     }
   };
 
@@ -610,21 +623,26 @@ const AppContent = () => {
                 <div className="space-y-6">
                     <div className="rounded-[32px] bg-white p-8 shadow-md ring-1 ring-slate-200 border-b-4 border-emerald-500">
                         <h3 className="text-sm font-bold uppercase text-slate-500 mb-6">4. Ejecución de Campaña</h3>
-                        <button 
-                            onClick={handleSendMessages} 
-                            disabled={isSending || !ready || excelData.length === 0} 
-                            className={`w-full rounded-2xl py-5 font-black text-xl tracking-tight transition-all shadow-lg flex items-center justify-center gap-3 ${
-                                isSending || !ready || excelData.length === 0 
-                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none' 
-                                : 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white hover:scale-[1.02] hover:shadow-emerald-200 active:scale-95'
-                            }`}
-                        >
-                            {isSending ? (
-                                <><RefreshCw className="animate-spin" size={24} /> PROCESANDO... </>
-                            ) : (
-                                <><Send size={24} /> LANZAR CAMPAÑA AHORA</>
-                            )}
-                        </button>
+                        {isSending ? (
+                            <button 
+                                onClick={handleStopCampaign} 
+                                className="w-full rounded-2xl py-5 font-black text-xl tracking-tight transition-all shadow-lg flex items-center justify-center gap-3 bg-red-600 text-white hover:bg-red-700 hover:scale-[1.02] active:scale-95 shadow-red-200"
+                            >
+                                <XCircle size={24} /> CANCELAR ENVÍO
+                            </button>
+                        ) : (
+                            <button 
+                                onClick={handleSendMessages} 
+                                disabled={!ready || excelData.length === 0} 
+                                className={`w-full rounded-2xl py-5 font-black text-xl tracking-tight transition-all shadow-lg flex items-center justify-center gap-3 ${
+                                    !ready || excelData.length === 0 
+                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none' 
+                                    : 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white hover:scale-[1.02] hover:shadow-emerald-200 active:scale-95'
+                                }`}
+                            >
+                                <Send size={24} /> LANZAR CAMPAÑA AHORA
+                            </button>
+                        )}
                         
                         {isSending && (
                             <div className="mt-8 p-4 bg-slate-50 rounded-2xl border border-slate-100">
