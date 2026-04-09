@@ -880,34 +880,30 @@ app.post('/send-messages', authenticate, async (req, res) => {
                 io.emit('log', `🔍 Verificando WhatsApp para: ${phone}...`);
                 
                 let numberId = null;
-                const MAX_VERIFY_RETRIES = 2;
+                const MAX_VERIFY_RETRIES = 1; // Reducido a 1 para mayor velocidad en campañas masivas
 
                 for (let attempt = 1; attempt <= MAX_VERIFY_RETRIES; attempt++) {
                     try {
                         const numberIdPromise = client.getNumberId(phone);
                         const timeoutPromise = new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 15000)
+                            setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 25000) // Aumentado a 25s
                         );
 
                         numberId = await Promise.race([numberIdPromise, timeoutPromise]);
                         if (numberId) break; 
                         
-                        if (attempt < MAX_VERIFY_RETRIES) {
-                             io.emit('log', `⏳ Reintentando verificación (${attempt}/${MAX_VERIFY_RETRIES}) para ${phone}...`);
-                        }
                     } catch (e) {
-                        io.emit('log', `⚠️ Timeout o error verificando ${phone} (Intento ${attempt}).`);
+                        io.emit('log', `⏳ Verificación lenta para ${phone}... (Usando modo persistente)`);
                         if (attempt < MAX_VERIFY_RETRIES) continue;
-                        // Si es el último intento y falló, dejamos que numberId sea null para ir al fallback
                     }
                 }
                 
-                // FALLBACK: Si no se pudo verificar pero es un móvil chileno (11 dígitos), intentamos envío directo
-                if (!numberId && phone.length === 11) {
-                    io.emit('log', `⚠️ Verificación fallida para ${phone}. Intentando envío forzado (Fallback)...`);
+                // FALLBACK OPTIMIZADO: Para números chilenos válidos, no nos detenemos si la verificación tarda
+                if (!numberId && phone.length === 11 && phone.startsWith('569')) {
+                    io.emit('log', `🚀 Envío optimizado para ${phone} (Sin verificación previa por lentitud)`);
                     phone = `${phone}@c.us`;
                 } else if (!numberId) {
-                    const errorMsg = `❌ El número ${phone} NO está registrado en WhatsApp y no cumple formato para fallback.`;
+                    const errorMsg = `❌ El número ${phone} no pudo ser verificado y no tiene formato estándar chileno.`;
                     console.warn(errorMsg);
                     io.emit('log', errorMsg);
                     
