@@ -715,15 +715,30 @@ app.post('/upload-text', authenticate, async (req, res) => {
         const now = new Date();
         const diaSemana = getSpanishDay(now);
         const fechaDisplay = now.toLocaleDateString('es-CL');
+        
+        let currentUnidad = unidadDefault || 'Atención Médica';
+        let currentProfesional = profesionalDefault || 'Médico';
 
         lines.forEach((line, idx) => {
             try {
-                // 1. Extraer Teléfono (Chilean Format)
+                const lineUpper = line.toUpperCase();
+                
+                // 1. DETECTOR DE CABECERAS (Contexto persistente)
+                if (lineUpper.includes('UNIDAD ATENCIÓN') || lineUpper.includes('UNIDAD ATENCION')) {
+                    currentUnidad = line.split(/unidad atenci[óo]n/gi)[1]?.replace(/^[:\s-]+/, '').trim() || currentUnidad;
+                    return;
+                }
+                if (lineUpper.includes('RECURSO')) {
+                    currentProfesional = line.split(/recurso/gi)[1]?.replace(/^[:\s-]+/, '').trim() || currentProfesional;
+                    return;
+                }
+
+                // 2. Extraer Teléfono (Chilean Format)
                 const phoneMatch = line.match(/(56)?9\d{8}/);
                 if (!phoneMatch) return;
                 const phone = phoneMatch[0];
 
-                // 2. Extraer Hora (Formato HH:MM)
+                // 3. Extraer Hora (Formato HH:MM)
                 const timeMatch = line.match(/\d{1,2}:\d{2}/);
                 const hora = timeMatch ? timeMatch[0] : 'Por definir';
 
@@ -750,7 +765,7 @@ app.post('/upload-text', authenticate, async (req, res) => {
                 };
 
                 let nombre = 'Paciente';
-                let motivo = 'Consulta Médica';
+                let motivo = currentUnidad; // Fallback al contexto de la unidad
 
                 // DETECTOR DE SEPARADOR (Tab, Pipe o múltiples espacios)
                 let parts = [];
@@ -761,30 +776,31 @@ app.post('/upload-text', authenticate, async (req, res) => {
                 if (parts.length > 3) {
                     // Si detectamos columnas claras (formato tabla)
                     nombre = cleanMedicalText(parts[2] || parts[1]);
-                    // Buscar motivo en columnas 1 a 8
+                    // Buscar motivo específico en la fila
                     for(let p of parts) {
                         const s = p.toUpperCase();
-                        if (s.includes('INTERCONSU') || s.includes('CONSULTA') || s.includes('CONTROL')) {
-                            motivo = cleanMedicalText(p);
-                            break;
-                        }
+                        if (s.includes('INTERCONSU')) { motivo = 'Interconsulta'; break; }
+                        if (s.includes('CONSULTA')) { motivo = 'Consulta'; break; }
+                        if (s.includes('CONTROL')) { motivo = 'Control'; break; }
+                        if (s.includes('PSICOTERAPIA')) { motivo = 'Psicoterapia'; break; }
                     }
                 } else {
                     // Formato Libre: Quitar el teléfono y la hora
                     let raw = line.replace(phone, '').replace(hora, '');
                     nombre = cleanMedicalText(raw);
-                    if (line.toUpperCase().includes('INTERCONSU')) motivo = 'Interconsulta';
+                    if (lineUpper.includes('INTERCONSU')) motivo = 'Interconsulta';
+                    else if (lineUpper.includes('CONTROL')) motivo = 'Control';
                 }
 
                 data.push({
                     Nombre: nombre || 'Paciente',
-                    Celular: phone, // El bucle de envío ya normaliza 569
+                    Celular: phone,
                     FechaDisplay: fechaDisplay,
                     HoraCita: hora,
                     DiaSemana: diaSemana,
                     Motivo: motivo,
-                    Unidad: unidadDefault || 'Atención Médica',
-                    Profesional: profesionalDefault || 'Médico'
+                    Unidad: currentUnidad,
+                    Profesional: currentProfesional
                 });
             } catch (err) {
                 console.error(`Error procesando línea ${idx}:`, err.message);
