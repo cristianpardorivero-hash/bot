@@ -1131,15 +1131,28 @@ app.post('/send-messages', authenticate, async (req, res) => {
                     io.emit('log', `⚠️ Estado de WhatsApp: ${state}. Intentando enviar de todos modos...`);
                 }
 
+                // 5. ENVÍO REAL (Con Timeout de Seguridad para no Colgarse)
                 io.emit('log', `📤 Enviando a ${phone}...`);
+                io.emit('log', `⏳ Iniciando transmisión real (WhatsApp Web)...`);
                 
-                // Timeout de seguridad para el envío (20s)
                 const sendPromise = client.sendMessage(phone, message);
-                const sendTimeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('TIMEOUT_SENDING')), 20000)
+                const sendTimeout = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('TIMEOUT_SEND')), 20000) 
                 );
 
-                await Promise.race([sendPromise, sendTimeoutPromise]);
+                try {
+                    const result = await Promise.race([sendPromise, sendTimeout]);
+                    io.emit('log', `✅ Mensaje entregado al motor de WhatsApp.`);
+                    io.emit('progress', { index: i, total: data.length, status: 'success' });
+                } catch (sendErr) {
+                    console.error(`❌ Error enviando a ${phone}:`, sendErr.message);
+                    io.emit('log', `❌ Error enviando a ${phone}: ${sendErr.message}`);
+                    io.emit('progress', { index: i, total: data.length, status: 'failed', error: sendErr.message });
+                    
+                    if (sendErr.message === 'TIMEOUT_SEND') {
+                        consecutiveTimeouts++;
+                    }
+                }
                 
                 console.log(`✅ Mensaje enviado a: ${phone}`);
                 io.emit('log', `✅ Mensaje enviado exitosamente a ${phone}`);
