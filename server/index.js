@@ -726,29 +726,44 @@ app.post('/upload-text', authenticate, async (req, res) => {
                 const timeMatch = line.match(/\d{1,2}:\d{2}/);
                 const hora = timeMatch ? timeMatch[0] : 'Por definir';
 
-                // 3. Extraer Nombre (Lógica Inteligente)
+                // 3. Extractor y Limpiador Inteligente de Nombres
+                const cleanMedicalText = (raw) => {
+                    if (!raw) return '';
+                    let clean = raw;
+                    // Eliminar fechas (09/04, 12/12/2024)
+                    clean = clean.replace(/\d{1,2}\/\d{1,2}(\/\d{2,4})?/g, '');
+                    // Eliminar RUTs (12.371.091-6, etc)
+                    clean = clean.replace(/\d{1,2}(?:\.\d{3}){0,2}-?[\dkK]/g, '');
+                    // Eliminar basura visual y códigos
+                    clean = clean.replace(/[_/\\|=-]{1,}/g, ' ');
+                    clean = clean.replace(/\.{2,}/g, ' ');
+                    // Eliminar palabras de ruido administrativo
+                    const noise = ['FONASA', 'FONASAB', 'FONASAA', 'ISAPRE', 'FONASAC', 'INTERCONSULTA', 'CITADO', 'CONTROL', 'PREVENCION'];
+                    noise.forEach(word => {
+                        const reg = new RegExp(`\\b${word}\\b`, 'gi');
+                        clean = clean.replace(reg, '');
+                    });
+                    return clean.replace(/\s+/g, ' ').trim();
+                };
+
                 let nombre = 'Paciente';
+                let motivo = 'Consulta Médica';
+
                 if (line.includes('|')) {
-                    // Formato Tabla: 1... | NOMBRE | MOTIVO | TEL
                     const parts = line.split('|').map(p => p.trim());
                     if (parts.length > 1) {
-                        // Limpiar nombres con puntos suspensivos o códigos
-                        nombre = parts[1].replace(/\.{2,}/g, '').replace(/[\d\.]+/g, '').trim();
-                        // Si el nombre quedó vacío o muy corto, intentar con otra parte
-                        if (nombre.length < 3 && parts[2]) nombre = parts[2].trim();
+                        nombre = cleanMedicalText(parts[1]);
+                        // Si el nombre quedó vacío o muy corto, revisar si está en otra columna
+                        if (nombre.length < 4 && parts[2]) nombre = cleanMedicalText(parts[2]);
+                    }
+                    if (parts.length > 2) {
+                        const rawMotivo = parts[2] || parts[1];
+                        motivo = cleanMedicalText(rawMotivo) || 'Consulta Médica';
                     }
                 } else {
-                    // Formato Libre: Quitar el teléfono y usar lo restante
-                    nombre = line.replace(phone, '').replace(hora, '').replace(/[:|\-]/g, '').trim();
-                    // Limpieza básica
-                    nombre = nombre.replace(/\d+\s+/g, '').replace(/\s+/g, ' '); 
-                }
-
-                // 4. Extraer Motivo (Si hay pipes)
-                let motivo = 'Consulta Médica';
-                if (line.includes('|')) {
-                    const parts = line.split('|').map(p => p.trim());
-                    if (parts.length > 2) motivo = parts[2].replace(/\.{2,}/g, '').trim();
+                    // Formato Libre: Quitar el teléfono y la hora
+                    let raw = line.replace(phone, '').replace(hora, '');
+                    nombre = cleanMedicalText(raw);
                 }
 
                 data.push({
