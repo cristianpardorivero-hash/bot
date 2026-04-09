@@ -694,6 +694,9 @@ function unescapeHTML(str) {
         .replace(/&Iacute;/gi, 'Í')
         .replace(/&Uacute;/gi, 'Ú')
         .replace(/&Ntilde;/gi, 'Ñ')
+        .replace(/&uuml;/gi, 'ü')
+        .replace(/&Uuml;/gi, 'Ü')
+        .replace(/&nbsp;/gi, ' ')
         .replace(/&quot;/gi, '"')
         .replace(/&amp;/gi, '&');
 }
@@ -712,7 +715,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         let currentProfesional = 'Médico';
         
         // Persistencia global de mapeo
-        let colIndices = { celular: -1, nombre: -1, fecha: -1, hora: -1, motivo: -1 };
+        let colIndices = { celular: -1, redFija: -1, nombre: -1, fecha: -1, hora: -1, motivo: -1 };
 
         // Iterar por TODAS las hojas del archivo
         workbook.SheetNames.forEach((sheetName, sIdx) => {
@@ -744,6 +747,10 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                     const s = String(h||'').toLowerCase();
                     return s.includes('celular') || s.includes('teléfono') || s.includes('telefono');
                 });
+                const redFijaIdx = row.findIndex(h => {
+                    const s = String(h||'').toLowerCase();
+                    return s.includes('red fija') || s.includes('casa') || s.includes('domicilio');
+                });
                 const nomIdx = row.findIndex(h => {
                     const s = String(h||'').toLowerCase();
                     return s.includes('nombre') || s.includes('paciente');
@@ -752,10 +759,11 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 if (celIdx !== -1 && nomIdx !== -1) {
                     currentLocalHeaderRow = i;
                     colIndices.celular = celIdx;
+                    colIndices.redFija = redFijaIdx; // Nueva columna de respaldo
                     colIndices.nombre = nomIdx;
                     colIndices.fecha = row.findIndex(h => {
                         const s = String(h||'').toLowerCase();
-                        return s.includes('fecha') || s.includes('cita') || s.includes('aten.');
+                        return (s.includes('fecha') || s.includes('cita') || s.includes('aten.')) && !s.includes('nacimiento');
                     });
                     colIndices.hora = row.findIndex(h => {
                         const s = String(h||'').toLowerCase();
@@ -775,10 +783,14 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 // Ignorar filas de separación o decorativas
                 if (firstColRaw.startsWith('---') || firstColRaw.includes('____')) continue;
 
-                const celRaw = String(row[colIndices.celular] || '');
+                const celRaw = String(row[colIndices.celular] || '').trim();
+                const fixedRaw = colIndices.redFija !== -1 ? String(row[colIndices.redFija] || '').trim() : '';
                 const nomRaw = String(row[colIndices.nombre] || '');
                 
-                if (!celRaw || !nomRaw || nomRaw.toLowerCase().includes('nombre')) continue;
+                // Priorizar celular, si está vacío usar Red Fija
+                let activePhoneRaw = celRaw || fixedRaw;
+                
+                if (!activePhoneRaw || !nomRaw || nomRaw.toLowerCase().includes('nombre')) continue;
 
                 const motivoRaw = colIndices.motivo !== -1 && row[colIndices.motivo] ? String(row[colIndices.motivo]).trim() : currentUnidad;
                 
@@ -814,7 +826,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                     }
                 }
 
-                let phoneRaw = celRaw.replace(/\D/g, '');
+                let phoneRaw = activePhoneRaw.replace(/\D/g, '');
                 if (phoneRaw.length >= 8) {
                     if (phoneRaw.length === 9 && phoneRaw.startsWith('9')) {
                         phoneRaw = '56' + phoneRaw;
