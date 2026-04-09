@@ -704,39 +704,42 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     }
 
     try {
-        console.log('--- Iniciando Parseo de Excel Multi-Hoja (Hospital Curepto) ---');
+        console.log('--- 📡 Iniciando Radar de Excel (Multi-Hoja) ---');
         const workbook = xlsx.readFile(req.file.path, { cellDates: true });
         
         const data = [];
         let currentUnidad = 'Consulta - Médico';
         let currentProfesional = 'Médico';
+        
+        // Persistencia global de mapeo
+        let colIndices = { celular: -1, nombre: -1, fecha: -1, hora: -1, motivo: -1 };
 
-        // Iterar por TODAS las hojas del archivo (Soporte para exportaciones SSMAULE)
-        workbook.SheetNames.forEach((sheetName) => {
+        // Iterar por TODAS las hojas del archivo
+        workbook.SheetNames.forEach((sheetName, sIdx) => {
             const sheet = workbook.Sheets[sheetName];
             const rawRows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
             
-            let headerRowIndex = -1;
-            let colIndices = { celular: -1, nombre: -1, fecha: -1, hora: -1, motivo: -1 };
             let patientsInSheet = 0;
+            let currentLocalHeaderRow = -1;
 
             for (let i = 0; i < rawRows.length; i++) {
-                const row = rawRows[i].map(cell => unescapeHTML(cell)); // Limpiar cada celda de HTML
+                const row = rawRows[i].map(cell => unescapeHTML(cell)); 
                 if (!row || row.length < 1) continue;
 
-                const firstCol = String(row[0] || '').toLowerCase();
+                const firstColRaw = String(row[0] || '').trim();
+                const firstColLower = firstColRaw.toLowerCase();
 
-                // 1. DETECTOR DE METADATOS (Context Aware entre hojas)
-                if (firstCol.includes('unidad atención')) {
+                // 1. DETECTOR DE METADATOS (Contexto persistente)
+                if (firstColLower.includes('unidad atención')) {
                     currentUnidad = cleanInternalCode(String(row[1] || row[0]).replace(/unidad atención/gi, '').replace(/^[:\s-]+/, '').trim());
                     continue;
                 }
-                if (firstCol.includes('recurso')) {
+                if (firstColLower.includes('recurso')) {
                     currentProfesional = cleanInternalCode(String(row[1] || row[0]).replace(/recurso/gi, '').replace(/^[:\s-]+/, '').trim());
                     continue;
                 }
 
-                // 2. BUSCADOR DE CABECERAS DINÁMICO
+                // 2. BUSCADOR DE CABECERAS (Si encuentra una, actualiza el Radar)
                 const celIdx = row.findIndex(h => {
                     const s = String(h||'').toLowerCase();
                     return s.includes('celular') || s.includes('teléfono') || s.includes('telefono');
@@ -747,7 +750,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 });
                 
                 if (celIdx !== -1 && nomIdx !== -1) {
-                    headerRowIndex = i;
+                    currentLocalHeaderRow = i;
                     colIndices.celular = celIdx;
                     colIndices.nombre = nomIdx;
                     colIndices.fecha = row.findIndex(h => {
@@ -765,13 +768,17 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                     continue;
                 }
 
-                // 3. PROCESAMIENTO DE PACIENTE
-                if (headerRowIndex === -1 || i <= headerRowIndex) continue;
+                // 3. PROCESAMIENTO DE PACIENTE (Modo Radar: Si tenemos columnas, intentamos leer)
+                if (i <= currentLocalHeaderRow && currentLocalHeaderRow !== -1) continue; 
+                if (colIndices.celular === -1 || colIndices.nombre === -1) continue;
+
+                // Ignorar filas de separación o decorativas
+                if (firstColRaw.startsWith('---') || firstColRaw.includes('____')) continue;
 
                 const celRaw = String(row[colIndices.celular] || '');
                 const nomRaw = String(row[colIndices.nombre] || '');
                 
-                if (!celRaw || !nomRaw) continue;
+                if (!celRaw || !nomRaw || nomRaw.toLowerCase().includes('nombre')) continue;
 
                 const motivoRaw = colIndices.motivo !== -1 && row[colIndices.motivo] ? String(row[colIndices.motivo]).trim() : currentUnidad;
                 
@@ -784,9 +791,11 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 const isJSDate = maybeDate instanceof Date;
 
                 if (isExcelDate || isJSDate) {
-                    let dateObj = isJSDate ? maybeDate : new Date((maybeDate - 25569) * 86400 * 1000);
-                    fetchRaw = dateObj.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                    horaRaw = dateObj.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+                    try {
+                        let dateObj = isJSDate ? maybeDate : new Date((maybeDate - 25569) * 86400 * 1000);
+                        fetchRaw = dateObj.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                        horaRaw = dateObj.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+                    } catch(e) {}
                 } else {
                     if (colIndices.fecha !== -1 && row[colIndices.fecha]) {
                         const fVal = row[colIndices.fecha];
@@ -829,16 +838,16 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                     }
                 }
             }
-            if (patientsInSheet > 0) {
-                console.log(`✅ Hoja "${sheetName}" procesada: ${patientsInSheet} pacientes encontrados.`);
+            if (patientsInSheet > 0 && sIdx % 10 === 0) {
+                console.log(`📡 Radar: Hoja ${sIdx} procesada (+${patientsInSheet} pacientes)`);
             }
         });
 
         if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-        console.log(`🏁 Carga finalizada: ${data.length} pacientes totales.`);
+        console.log(`🏁 Radar finalizado: ${data.length} pacientes capturados.`);
 
         if (data.length === 0) {
-            return res.status(400).send('No se detectaron pacientes válidos. Revisa que el Excel tenga la columna "Celular".');
+            return res.status(400).send('No se detectaron pacientes. El archivo tiene un formato no reconocido.');
         }
 
         res.json(data);
