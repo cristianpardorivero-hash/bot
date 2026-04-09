@@ -1023,19 +1023,7 @@ app.post('/send-messages', authenticate, async (req, res) => {
                 console.log(`✅ Mensaje enviado a: ${phone}`);
                 io.emit('log', `✅ Mensaje enviado exitosamente a ${phone}`);
                 io.emit('progress', { index: i, total: data.length, status: 'sent' });
-            } catch (sendErr) {
-                const errMsg = sendErr.message || 'Error desconocido';
-                console.error(`❌ Error enviando a ${phone}:`, errMsg);
-                
-                if (errMsg.includes('LID')) {
-                    io.emit('log', `⚠️ WhatsApp reportó error de ID (LID) para ${phone}. Saltando...`);
-                } else {
-                    io.emit('log', `❌ Fallo al enviar a ${phone}: ${errMsg}`);
-                }
-                
-                io.emit('progress', { index: i, total: data.length, status: 'failed', error: errMsg });
-                continue; // No detener la campaña por un error individual
-            }
+
                 const getValue = (keys) => {
                     const foundKey = Object.keys(row).find(k => 
                         keys.some(search => k.trim().toLowerCase().includes(search.toLowerCase()))
@@ -1076,15 +1064,21 @@ app.post('/send-messages', authenticate, async (req, res) => {
                 });
 
             } catch (error) {
-                const errorMsg = `❌ Error enviando a ${phone}: ${error.message}`;
-                console.error(errorMsg);
-                io.emit('log', errorMsg);
+                const errMsg = error.message || 'Error desconocido';
+                console.error(`❌ Error procesando envío a ${phone}:`, errMsg);
+                
+                if (errMsg.includes('LID')) {
+                    io.emit('log', `⚠️ WhatsApp reportó error de ID (LID) para ${phone}. Saltando...`);
+                } else {
+                    io.emit('log', `❌ Fallo al enviar a ${phone}: ${errMsg}`);
+                }
+                
                 io.emit('progress', {
                     index: i,
                     total: data.length,
                     status: 'failed',
                     phone: phone,
-                    error: error.message
+                    error: errMsg
                 });
             }
 
