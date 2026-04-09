@@ -1019,8 +1019,21 @@ app.post('/send-messages', authenticate, async (req, res) => {
             });
 
             try {
+                const state = await client.getState().catch(() => 'UNKNOWN');
+                if (state !== 'CONNECTED') {
+                    io.emit('log', `⚠️ Estado de WhatsApp: ${state}. Intentando enviar de todos modos...`);
+                }
+
                 io.emit('log', `📤 Enviando a ${phone}...`);
-                await client.sendMessage(phone, message);
+                
+                // Timeout de seguridad para el envío (20s)
+                const sendPromise = client.sendMessage(phone, message);
+                const sendTimeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('TIMEOUT_SENDING')), 20000)
+                );
+
+                await Promise.race([sendPromise, sendTimeoutPromise]);
+                
                 console.log(`✅ Mensaje enviado a: ${phone}`);
                 io.emit('log', `✅ Mensaje enviado exitosamente a ${phone}`);
                 io.emit('progress', { index: i, total: data.length, status: 'sent' });
