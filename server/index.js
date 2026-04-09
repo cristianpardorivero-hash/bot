@@ -851,8 +851,8 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                     }
                 }
             }
-            if (patientsInSheet > 0 && sIdx % 10 === 0) {
-                console.log(`📡 Radar: Hoja ${sIdx} procesada (+${patientsInSheet} pacientes)`);
+            if (patientsInSheet > 0) {
+                console.log(`📡 Radar: Hoja ${sIdx} ("${sheetName}") procesada (+${patientsInSheet} pacientes)`);
             }
         });
 
@@ -963,7 +963,7 @@ app.post('/send-messages', authenticate, async (req, res) => {
                 try {
                     const numberIdPromise = client.getNumberId(phone);
                     const timeoutPromise = new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 15000) 
+                        setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 3000) 
                     );
                     numberId = await Promise.race([numberIdPromise, timeoutPromise]);
                 } catch (e) {
