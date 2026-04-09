@@ -153,35 +153,45 @@ let clientReady = false;
 let stopCampaign = false; // Nueva bandera para control de interrupción
 let currentQr = null;
 
-// Peristent sessions management (Using absolute path for reliability)
-const SESSIONS_FILE = path.resolve(__dirname, 'sessions.json');
-
+// Peristent sessions management (Now using Firestore for reliability on Railway)
 let sessions = {};
 
 let incomingLogs = []; // CAJA NEGRA: Para ver mensajes reales en /debug
 
-function loadSessions() {
+async function loadSessions() {
     try {
-        if (fs.existsSync(SESSIONS_FILE)) {
-            const data = fs.readFileSync(SESSIONS_FILE, 'utf8');
-            sessions = JSON.parse(data);
-            console.log(`✅ Base de datos (Campañas) cargada: ${Object.keys(sessions).length} registros.`);
-        }
-
+        console.log("📥 Cargando sesiones desde Firestore...");
+        const snapshot = await admin.firestore().collection('sessions').get();
+        const loadedSessions = {};
+        snapshot.forEach(doc => {
+            loadedSessions[doc.id] = doc.data();
+        });
+        sessions = loadedSessions;
+        console.log(`✅ Base de datos (Campañas) sincronizada: ${Object.keys(sessions).length} registros.`);
+        
+        // Emitir a clientes conectados si hay alguno
+        if (io) io.emit('initial_sessions', sessions);
     } catch (e) {
-        console.error("❌ Error cargando sesiones:", e.message);
+        console.error("❌ Error cargando sesiones desde Firestore:", e.message);
     }
 }
 
-function saveSessions() {
+// Guardar/Actualizar una sesión individual en Firestore
+async function saveSession(id, data) {
     try {
-        fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2), 'utf8');
-
+        await admin.firestore().collection('sessions').doc(id).set({
+            ...data,
+            lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        
+        // Actualizar caché local
+        sessions[id] = { ...sessions[id], ...data, lastUpdated: new Date().toISOString() };
     } catch (e) {
-        console.error("❌ Error guardando sesiones:", e.message);
+        console.error(`❌ Error guardando sesión ${id} en Firestore:`, e.message);
     }
 }
 
+// Carga inicial (Silenciosa al arranque, ruidosa al solicitar estado)
 loadSessions();
 
 // NUEVO: Ayudante para registro histórico en Firestore (Imborrable)
@@ -311,15 +321,14 @@ function initializeWhatsApp() {
                 console.log(`✅ Respuesta de confirmación detectada de ${from}: "${msg.body}"`);
                 io.emit('log', `✅ El paciente ${from} ha CONFIRMADO su cita vía chat.`);
 
-                // 1. Actualizar sessions.json (Cache local)
+                // 1. Actualizar Firestore y caché local
                 let foundInSessions = false;
                 for (const phone in sessions) {
                     if (phone.includes(from) || sessions[phone].whatsapp_id === msg.from) {
-                        sessions[phone].status = 'Confirmada'; // Unificado a status
+                        await saveSession(phone, { status: 'Confirmada' });
                         foundInSessions = true;
                     }
                 }
-                if (foundInSessions) saveSessions();
 
                 // 2. Actualizar Firestore
                 const snapshot = await admin.firestore().collection('historial_envios')
@@ -423,8 +432,7 @@ function initializeWhatsApp() {
             }
 
             if (updated) {
-                sessions[match].lastUpdated = new Date().toISOString();
-                saveSessions();
+                await saveSession(match, { status: sessions[match].status });
                 io.emit('status_update', { id: match, status: sessions[match].status, data: sessions[match] });
                 io.emit('progress', {
                     status: 'success',
@@ -490,7 +498,7 @@ io.on('connection', (socket) => {
 
 
     // Permite al frontend solicitar el estado si sufre una carrera (race condition) al recargar la página
-    socket.on('request_status', () => {
+    socket.on('request_status', async () => {
         console.log(`⚡ Solicitud de estado recibida de: ${socket.id} (clientReady: ${clientReady})`);
         if (clientReady) {
             socket.emit('ready', true);
@@ -501,6 +509,9 @@ io.on('connection', (socket) => {
         } else {
             socket.emit('whatsapp_status', { state: 'INITIALIZING', message: 'Iniciando motor de WhatsApp...' });
         }
+        
+        // Refrescar sesiones desde Firestore antes de enviar el estado inicial
+        await loadSessions();
         socket.emit('initial_sessions', sessions);
     });
 });
@@ -509,40 +520,50 @@ app.get('/sessions', (req, res) => {
     res.json(sessions);
 });
 
-// Purgado TOTAL (Sólo Admin debería usarlo, aunque aquí manejamos la lógica del servidor)
-app.delete('/sessions', authenticate, (req, res) => {
-    sessions = {};
-    saveSessions();
-    res.send('Sessions cleared');
+// Purgado TOTAL (Sólo Admin debería usarlo)
+app.delete('/sessions', authenticate, async (req, res) => {
+    try {
+        const batch = admin.firestore().batch();
+        const snapshot = await admin.firestore().collection('sessions').get();
+        snapshot.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+        
+        sessions = {};
+        res.send('Sessions cleared in Firestore and Memory');
+    } catch (e) {
+        res.status(500).send(`Error clearing sessions: ${e.message}`);
+    }
 });
 
-// NUEVO: Purgado SELECTIVO de confirmados (Accesible para todos los autenticados)
-app.delete('/sessions/confirmed', authenticate, (req, res) => {
-    const originalCount = Object.keys(sessions).length;
-    
-    // Filtrar sesiones: Mantener solo las que NO están confirmadas
-    const remainingSessions = {};
-    Object.entries(sessions).forEach(([id, session]) => {
-        if (session.status !== 'Confirmada') {
-            remainingSessions[id] = session;
-        }
-    });
+// NUEVO: Purgado SELECTIVO de confirmados
+app.delete('/sessions/confirmed', authenticate, async (req, res) => {
+    try {
+        const batch = admin.firestore().batch();
+        let deletedCount = 0;
+        
+        Object.entries(sessions).forEach(([id, session]) => {
+            if (session.status === 'Confirmada') {
+                batch.delete(admin.firestore().collection('sessions').doc(id));
+                delete sessions[id];
+                deletedCount++;
+            }
+        });
 
-    sessions = remainingSessions;
-    saveSessions();
-    
-    const deletedCount = originalCount - Object.keys(sessions).length;
-    res.send(`Se han purgado ${deletedCount} sesiones confirmadas.`);
+        if (deletedCount > 0) await batch.commit();
+        res.send(`Se han purgado ${deletedCount} sesiones confirmadas.`);
+    } catch (e) {
+        res.status(500).send(`Error deleting confirmed: ${e.message}`);
+    }
 });
 
-app.delete('/sessions/:id', authenticate, (req, res) => {
+app.delete('/sessions/:id', authenticate, async (req, res) => {
     const { id } = req.params;
-    if (sessions[id]) {
-        delete sessions[id];
-        saveSessions();
+    try {
+        await admin.firestore().collection('sessions').doc(id).delete();
+        if (sessions[id]) delete sessions[id];
         res.send('Session deleted');
-    } else {
-        res.status(404).send('Session not found');
+    } catch (e) {
+        res.status(500).send(`Error deleting session: ${e.message}`);
     }
 });
 
@@ -975,7 +996,7 @@ app.post('/send-messages', authenticate, async (req, res) => {
                 };
 
                 const sessionKey = String(row[actualPhoneColumn]).replace(/\D/g, ''); 
-                sessions[sessionKey] = {
+                const sessionData = {
                     nombre: getValue(['nombre', 'paciente']) || 'Paciente',
                     telefonoOriginal: row[actualPhoneColumn] || phone,
                     whatsapp_id: phone,
@@ -983,11 +1004,11 @@ app.post('/send-messages', authenticate, async (req, res) => {
                     fecha: getValue(['fecha', 'día', 'dia']) || '',
                     hora: getValue(['hora']) || '',
                     profesional: getValue(['profesional', 'médico', 'medico', 'especialista']) || 'No asignado',
-                    originalMessage: message, // Guardamos el mensaje para poder reenviarlo idéntico
-                    status: 'Enviado',
-                    lastUpdated: new Date().toISOString()
+                    originalMessage: message,
+                    status: 'Enviado'
                 };
-                saveSessions();
+
+                await saveSession(sessionKey, sessionData);
 
                 io.emit('progress', {
                     index: i,
@@ -1110,9 +1131,7 @@ app.post('/resend-individual', authenticate, async (req, res) => {
         
         await client.sendMessage(target, session.originalMessage);
         
-        session.status = 'Reenviado';
-        session.lastUpdated = new Date().toISOString();
-        saveSessions();
+        await saveSession(id, { status: 'Reenviado' });
 
         // Registro histórico en Firestore
         logMessageToFirestore({
