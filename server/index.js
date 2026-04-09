@@ -92,11 +92,22 @@ const isOriginAllowed = (origin) => {
 };
 
 // 1. Sistema de Seguridad y Conectividad (CORS Unificado)
-app.use(cors({
-    origin: (origin, callback) => callback(null, isOriginAllowed(origin)),
+const corsOptions = {
+    origin: (origin, callback) => {
+        const allowed = isOriginAllowed(origin);
+        if (origin && !allowed) {
+            console.warn(`🚨 CORS bloqueado para origen: ${origin}`);
+        }
+        callback(null, allowed);
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
     optionsSuccessStatus: 204
-}));
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // Habilitar pre-flight para todas las rutas
 
 app.use(express.json());
 
@@ -107,17 +118,24 @@ app.use(express.static(path.join(__dirname, '../client/dist')));
 
 // 2. Configuración Socket.io (Saturación de CORS para estabilidad)
 const io = new Server(server, {
-    cors: {
-        origin: (origin, callback) => callback(null, isOriginAllowed(origin)),
-        methods: ["GET", "POST"],
-        credentials: true,
-        allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
-    },
+    cors: corsOptions, // Usar la misma configuración de CORS que Express
     transports: ["websocket", "polling"],
     allowEIO3: true,
     pingTimeout: 60000,
-    pingInterval: 25000
+    pingInterval: 25000,
+    connectTimeout: 45000
 });
+
+// Endpoint de Salud para Railway
+app.get('/health', (req, res) => {
+    res.status(200).json({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        clientReady
+    });
+});
+
+app.get('/ping', (req, res) => res.send('pong'));
 
 // Diagnóstico de errores globales
 process.on('unhandledRejection', (reason, promise) => {
@@ -201,30 +219,34 @@ function initializeWhatsApp() {
 
     client = new Client({
         authStrategy: new LocalAuth(),
-        authTimeoutMs: 0, // Desactiva timeout de autenticación para evitar cierres prematuros
-        qrMaxRetries: 0,   // Intenta generar el QR indefinidamente
+        authTimeoutMs: 60000, // Tiempo límite para autenticación
+        qrMaxRetries: 5,      // Evitar bucles infinitos de QR si algo falla
+        restartOnAuthFail: true,
         webVersionCache: {
             type: 'remote',
             remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1018978711.html',
         },
         puppeteer: {
-            headless: true, // Modo más estable para entornos sin servidor gráfico
+            headless: true,
             executablePath: executablePath || undefined,
-            protocolTimeout: 180000, // Aumentado a 3 min para conexiones lentas en Railway
+            protocolTimeout: 0, 
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-extensions',
                 '--disable-dev-shm-usage',
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
                 '--disable-gpu',
                 '--disable-software-rasterizer',
+                '--disable-extensions',
                 '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
             ]
         }
     });
+
+    // Manejo de errores durante la inicialización
+    let isInitializing = false;
 
     // Detectar si el navegador o la página se cierran solos
     client.on('change_state', (state) => {
@@ -416,11 +438,19 @@ function initializeWhatsApp() {
         }
     }, 120000);
 
-    client.initialize().catch(err => {
+    if (isInitializing) return;
+    isInitializing = true;
+
+    client.initialize().then(() => {
+        isInitializing = false;
+    }).catch(err => {
         console.error('❌ Falló el arranque de WhatsApp:', err.message);
+        isInitializing = false;
         clearTimeout(initTimeout);
-        io.emit('whatsapp_status', { state: 'ERROR', message: 'Falla crítica del navegador. Reintentando...' });
-        setTimeout(() => initializeWhatsApp(), 10000);
+        io.emit('whatsapp_status', { state: 'ERROR', message: 'Falla crítica del navegador. Reintentando en 30s...' });
+        
+        // Reintento más espaciado para no bloquear el servidor
+        setTimeout(() => initializeWhatsApp(), 30000);
     });
     
     client.on('ready', () => {
