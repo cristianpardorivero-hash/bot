@@ -314,8 +314,8 @@ function initializeWhatsApp() {
                 // 1. Actualizar sessions.json (Cache local)
                 let foundInSessions = false;
                 for (const phone in sessions) {
-                    if (phone.includes(from)) {
-                        sessions[phone].estado = 'Confirmado';
+                    if (phone.includes(from) || sessions[phone].whatsapp_id === msg.from) {
+                        sessions[phone].status = 'Confirmada'; // Unificado a status
                         foundInSessions = true;
                     }
                 }
@@ -330,9 +330,10 @@ function initializeWhatsApp() {
 
                 const updates = [];
                 snapshot.forEach(doc => {
-                    if (doc.data().telefono.includes(from)) {
+                    const docData = doc.data();
+                    if (docData.telefono.includes(from) || docData.whatsapp_id === msg.from) {
                         updates.push(doc.ref.update({ 
-                            estado: 'Confirmado',
+                            status: 'Confirmada', // Unificado a status
                             confirmadoAt: admin.firestore.FieldValue.serverTimestamp()
                         }));
                     }
@@ -383,14 +384,20 @@ function initializeWhatsApp() {
         io.emit('log', `📩 Bot escuchó: "${cleanBody}" de ${numberOnly}`);
         io.emit('log', `🔍 Paso 1: Normalizado a "${cleanBody}". Buscando paciente...`);
 
-        const match = Object.keys(sessions).find(id => {
-            const cleanId = id.replace(/\D/g, '');
-            // Coincidencia por últimos 8 dígitos (más robusto para variaciones de +569 / 9 / 56)
+        // SISTEMA DE EMPAREJAMIENTO DE PACIENTES (Busca por ID exacta o por últimos dígitos)
+        const match = Object.keys(sessions).find(key => {
+            const session = sessions[key];
+            
+            // 1. Coincidencia exacta por ID de WhatsApp (Muy robusto para @lid y @c.us)
+            if (session.whatsapp_id === msg.from) return true;
+            
+            // 2. Coincidencia por últimos 8 dígitos del número (Respaldo para números nuevos)
+            const cleanId = key.replace(/\D/g, '');
             return cleanId.slice(-8) === numberOnly.slice(-8);
         });
 
         if (!match) {
-            io.emit('log', `❌ No se encontró una cita activa (Radar) para el número terminando en ${numberOnly.slice(-4)}.`);
+            console.log(`❌ No se encontró coincidencia para ${fromRaw} (Radar: ${numberOnly})`);
         }
 
         if (match) {
