@@ -533,7 +533,21 @@ const AppContent = () => {
 
                 <div className="rounded-[32px] bg-white p-6 shadow-sm ring-1 ring-slate-200 flex flex-col">
                     <div className="flex items-center justify-between mb-6">
-                        <h3 className="text-sm font-bold uppercase text-slate-500">2. Carga de Destinatarios</h3>
+                        <div className="flex items-center gap-4">
+                            <h3 className="text-sm font-bold uppercase text-slate-500">2. Carga de Destinatarios</h3>
+                            {excelData.length > 0 && (
+                                <button 
+                                    onClick={() => {
+                                        setExcelData([]);
+                                        setPastedText('');
+                                        setProgress({ index: 0, total: 0 });
+                                    }}
+                                    className="flex items-center gap-1.5 px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-500 rounded-lg text-[10px] font-bold transition-all border border-red-100"
+                                >
+                                    <Trash2 size={12} /> LIMPIAR
+                                </button>
+                            )}
+                        </div>
                         <div className="flex bg-slate-100 p-1 rounded-xl">
                             <button 
                                 onClick={() => setImportMode('excel')}

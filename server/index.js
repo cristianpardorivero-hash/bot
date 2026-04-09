@@ -709,6 +709,7 @@ app.post('/upload-text', authenticate, async (req, res) => {
         if (!text) return res.status(400).send('No se recibió texto.');
 
         console.log('--- 📡 Procesando Copiado Rápido de Texto ---');
+        // Separar por líneas, limpiar espacios y filtrar líneas vacías o muy cortas
         const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 5);
         const data = [];
         const now = new Date();
@@ -734,11 +735,13 @@ app.post('/upload-text', authenticate, async (req, res) => {
                     clean = clean.replace(/\d{1,2}\/\d{1,2}(\/\d{2,4})?/g, '');
                     // Eliminar RUTs (12.371.091-6, etc)
                     clean = clean.replace(/\d{1,2}(?:\.\d{3}){0,2}-?[\dkK]/g, '');
+                    // Eliminar letras sueltas rodeadas de espacios (M, F, N, S, C) que son metadatos de columnas
+                    clean = clean.replace(/\s[MFNSC]\s/g, ' ').replace(/^[MFNSC]\s/g, ' ').replace(/\s[MFNSC]$/g, ' ');
                     // Eliminar basura visual y códigos
                     clean = clean.replace(/[_/\\|=-]{1,}/g, ' ');
                     clean = clean.replace(/\.{2,}/g, ' ');
                     // Eliminar palabras de ruido administrativo
-                    const noise = ['FONASA', 'FONASAB', 'FONASAA', 'ISAPRE', 'FONASAC', 'INTERCONSULTA', 'CITADO', 'CONTROL', 'PREVENCION'];
+                    const noise = ['FONASA', 'FONASAB', 'FONASAA', 'ISAPRE', 'FONASAC', 'INTERCONSULTA', 'CITADO', 'CONTROL', 'PREVENCION', 'NORMAL', 'SUBESCUPO'];
                     noise.forEach(word => {
                         const reg = new RegExp(`\\b${word}\\b`, 'gi');
                         clean = clean.replace(reg, '');
@@ -749,21 +752,28 @@ app.post('/upload-text', authenticate, async (req, res) => {
                 let nombre = 'Paciente';
                 let motivo = 'Consulta Médica';
 
-                if (line.includes('|')) {
-                    const parts = line.split('|').map(p => p.trim());
-                    if (parts.length > 1) {
-                        nombre = cleanMedicalText(parts[1]);
-                        // Si el nombre quedó vacío o muy corto, revisar si está en otra columna
-                        if (nombre.length < 4 && parts[2]) nombre = cleanMedicalText(parts[2]);
-                    }
-                    if (parts.length > 2) {
-                        const rawMotivo = parts[2] || parts[1];
-                        motivo = cleanMedicalText(rawMotivo) || 'Consulta Médica';
+                // DETECTOR DE SEPARADOR (Tab, Pipe o múltiples espacios)
+                let parts = [];
+                if (line.includes('\t')) parts = line.split('\t');
+                else if (line.includes('|')) parts = line.split('|');
+                else if (line.includes('   ')) parts = line.split(/\s{3,}/); // 3 o más espacios como columna
+
+                if (parts.length > 3) {
+                    // Si detectamos columnas claras (formato tabla)
+                    nombre = cleanMedicalText(parts[2] || parts[1]);
+                    // Buscar motivo en columnas 1 a 8
+                    for(let p of parts) {
+                        const s = p.toUpperCase();
+                        if (s.includes('INTERCONSU') || s.includes('CONSULTA') || s.includes('CONTROL')) {
+                            motivo = cleanMedicalText(p);
+                            break;
+                        }
                     }
                 } else {
                     // Formato Libre: Quitar el teléfono y la hora
                     let raw = line.replace(phone, '').replace(hora, '');
                     nombre = cleanMedicalText(raw);
+                    if (line.toUpperCase().includes('INTERCONSU')) motivo = 'Interconsulta';
                 }
 
                 data.push({
