@@ -955,46 +955,31 @@ app.post('/send-messages', authenticate, async (req, res) => {
             }
 
             try {
+                // 4. VERIFICACIÓN DE WHATSAPP (Con Radar de Reintentos)
                 io.emit('log', `🔍 Verificando WhatsApp para: ${phone}...`);
                 
                 let numberId = null;
-                const MAX_VERIFY_RETRIES = 1; // Reducido a 1 para mayor velocidad en campañas masivas
-
-                for (let attempt = 1; attempt <= MAX_VERIFY_RETRIES; attempt++) {
-                    try {
-                        const numberIdPromise = client.getNumberId(phone);
-                        const timeoutPromise = new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 25000) // Aumentado a 25s
-                        );
-
-                        numberId = await Promise.race([numberIdPromise, timeoutPromise]);
-                        if (numberId) break; 
-                        
-                    } catch (e) {
-                        io.emit('log', `⏳ Verificación lenta para ${phone}... (Usando modo persistente)`);
-                        if (attempt < MAX_VERIFY_RETRIES) continue;
-                    }
+                try {
+                    const numberIdPromise = client.getNumberId(phone);
+                    const timeoutPromise = new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 15000) 
+                    );
+                    numberId = await Promise.race([numberIdPromise, timeoutPromise]);
+                } catch (e) {
+                    io.emit('log', `⏳ Verificación lenta o error de ID para ${phone}.`);
                 }
                 
-                // FALLBACK OPTIMIZADO: Para números chilenos válidos, no nos detenemos si la verificación tarda
-                if (!numberId && phone.length === 11 && phone.startsWith('569')) {
-                    io.emit('log', `🚀 Envío optimizado para ${phone} (Sin verificación previa por lentitud)`);
-                    phone = `${phone}@c.us`;
-                } else if (!numberId) {
-                    const errorMsg = `❌ El número ${phone} no pudo ser verificado y no tiene formato estándar chileno.`;
-                    console.warn(errorMsg);
-                    io.emit('log', errorMsg);
-                    
-                    consecutiveTimeouts++;
-                    if (consecutiveTimeouts >= 5) {
-                        const criticalMsg = "🚨 DETECCIÓN DE FALLO MASIVO: Deteniendo proceso por seguridad.";
-                        io.emit('log', criticalMsg);
-                        break;
+                // FALLBACK: Si no hay ID oficial (LID), intentamos el formato tradicional @c.us
+                if (!numberId) {
+                    if (phone.length === 11 && phone.startsWith('569')) {
+                        io.emit('log', `🚀 Usando modo persistente para ${phone} (Fallback @c.us)`);
+                        phone = `${phone}@c.us`;
+                    } else {
+                        throw new Error(`Número inválido o no reconocido por WhatsApp: ${phone}`);
                     }
-                    continue;
                 } else {
                     phone = numberId._serialized;
-                    consecutiveTimeouts = 0; // Resetear contador al tener éxito
+                    consecutiveTimeouts = 0; 
                 }
             } catch (err) {
                 console.error(`🔴 Error crítico en bucle de verificación para ${phone}:`, err.message);
@@ -1037,7 +1022,20 @@ app.post('/send-messages', authenticate, async (req, res) => {
                 await client.sendMessage(phone, message);
                 console.log(`✅ Mensaje enviado a: ${phone}`);
                 io.emit('log', `✅ Mensaje enviado exitosamente a ${phone}`);
+                io.emit('progress', { index: i, total: data.length, status: 'sent' });
+            } catch (sendErr) {
+                const errMsg = sendErr.message || 'Error desconocido';
+                console.error(`❌ Error enviando a ${phone}:`, errMsg);
                 
+                if (errMsg.includes('LID')) {
+                    io.emit('log', `⚠️ WhatsApp reportó error de ID (LID) para ${phone}. Saltando...`);
+                } else {
+                    io.emit('log', `❌ Fallo al enviar a ${phone}: ${errMsg}`);
+                }
+                
+                io.emit('progress', { index: i, total: data.length, status: 'failed', error: errMsg });
+                continue; // No detener la campaña por un error individual
+            }
                 const getValue = (keys) => {
                     const foundKey = Object.keys(row).find(k => 
                         keys.some(search => k.trim().toLowerCase().includes(search.toLowerCase()))
