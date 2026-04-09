@@ -71,6 +71,11 @@ const AppContent = () => {
   const [manualMessage, setManualMessage] = useState('');
   const [isManualSending, setIsManualSending] = useState(false);
   
+  // --- SISTEMA DE IMPORTACIÓN RÁPIDA ---
+  const [importMode, setImportMode] = useState('excel'); // 'excel' | 'paste'
+  const [pastedText, setPastedText] = useState('');
+  const [isImportingText, setIsImportingText] = useState(false);
+  
   // Instancia de socket memoizada
   const socket = useMemo(() => io(API_URL, {
     reconnection: true,
@@ -146,6 +151,25 @@ const AppContent = () => {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx']
     }
   });
+
+  const handleTextImport = async () => {
+    if (!pastedText.trim()) return;
+    setIsImportingText(true);
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await axios.post(`${API_URL}/upload-text`, { text: pastedText }, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      setExcelData(response.data);
+      alert(`✅ Se extrajeron ${response.data.length} pacientes del texto.`);
+      setImportMode('excel'); // Volver a la vista de tabla para previsualizar
+    } catch (error) {
+      console.error('Error importing text:', error);
+      alert('Error al procesar el texto. Asegúrate de que el formato sea similar al ejemplo.');
+    } finally {
+      setIsImportingText(false);
+    }
+  };
 
   const [messageTemplate, setMessageTemplate] = useState('👋 *Hola {{Nombre}}*\n🏥 El *Hospital de Curepto* le recuerda su próxima cita:\n📆 *{{DiaSemana}} {{FechaDisplay}}*  ⏰ *{{HoraCita}}*\n📄 *Motivo:* {{Motivo}}\n\n--------------------------\n🙏 *POR FAVOR RESPONDA:*\n✅ Marque **1** para *CONFIRMAR*\n❌ Marque **2** para *CANCELAR*\n⏳ Marque **3** para *REAGENDAR*\n--------------------------\n\n📞 Consultas: *75 256 5688*\n🌐 *¿No puede asistir? Reagende aquí:* https://telesalud.gob.cl/\n⏳ Llegue con *20 minutos de anticipación*\n\n💙 ¡Muchas gracias por su atención!');
   const [isSending, setIsSending] = useState(false);
@@ -507,18 +531,54 @@ const AppContent = () => {
                     )}
                 </div>
 
-                <div className="rounded-[32px] bg-white p-6 shadow-sm ring-1 ring-slate-200 flex flex-col justify-center">
-                    <h3 className="text-sm font-bold uppercase text-slate-500 mb-6">2. Carga de Destinatarios</h3>
-                    <div {...getRootProps()} className="flex-1 rounded-[28px] border-2 border-dashed border-slate-200 bg-slate-50 p-8 text-center flex flex-col items-center justify-center cursor-pointer hover:bg-slate-100 transition-all">
-                        <input {...getInputProps()} />
-                        <Upload className="mb-4 text-emerald-500" size={40} />
-                        <h3 className="text-lg font-bold text-slate-700">Importar Excel</h3>
-                        <p className="text-sm text-slate-500 mt-2">
-                            {excelData.length > 0 ? (
-                                <span className="text-emerald-600 font-bold">✅ {excelData.length} contactos cargados exitosamente.</span>
-                            ) : 'Arrastra tu archivo aquí o haz clic para buscar'}
-                        </p>
+                <div className="rounded-[32px] bg-white p-6 shadow-sm ring-1 ring-slate-200 flex flex-col">
+                    <div className="flex items-center justify-between mb-6">
+                        <h3 className="text-sm font-bold uppercase text-slate-500">2. Carga de Destinatarios</h3>
+                        <div className="flex bg-slate-100 p-1 rounded-xl">
+                            <button 
+                                onClick={() => setImportMode('excel')}
+                                className={`px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all ${importMode === 'excel' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}
+                            >
+                                ARCHIVO EXCEL
+                            </button>
+                            <button 
+                                onClick={() => setImportMode('paste')}
+                                className={`px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all ${importMode === 'paste' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}
+                            >
+                                PEGAR TEXTO
+                            </button>
+                        </div>
                     </div>
+
+                    {importMode === 'excel' ? (
+                        <div {...getRootProps()} className="flex-1 min-h-[140px] rounded-[28px] border-2 border-dashed border-slate-200 bg-slate-50 p-6 text-center flex flex-col items-center justify-center cursor-pointer hover:bg-slate-100 transition-all">
+                            <input {...getInputProps()} />
+                            <Upload className="mb-3 text-emerald-500" size={32} />
+                            <h3 className="text-base font-bold text-slate-700">Importar Excel</h3>
+                            <p className="text-xs text-slate-500 mt-2">
+                                {excelData.length > 0 ? (
+                                    <span className="text-emerald-600 font-bold">✅ {excelData.length} contactos cargados exitosamente.</span>
+                                ) : 'Arrastra tu archivo aquí o haz clic'}
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="flex-1 flex flex-col gap-3">
+                            <textarea 
+                                value={pastedText}
+                                onChange={(e) => setPastedText(e.target.value)}
+                                placeholder="Pega aquí la lista de la agenda (Ej: 10:30 | JUAN PEREZ | ...) "
+                                className="flex-1 min-h-[120px] rounded-2xl bg-slate-50 border border-slate-200 p-4 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all resize-none"
+                            />
+                            <button 
+                                onClick={handleTextImport}
+                                disabled={isImportingText || !pastedText.trim()}
+                                className="w-full bg-slate-900 text-white font-bold py-3 rounded-xl hover:opacity-90 disabled:bg-slate-300 transition-all text-sm flex items-center justify-center gap-2"
+                            >
+                                {isImportingText ? <RefreshCw className="animate-spin" size={16} /> : <Plus size={16} />}
+                                {isImportingText ? 'Procesando...' : 'Procesar Lista Pegada'}
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
 

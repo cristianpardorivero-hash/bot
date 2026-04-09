@@ -702,6 +702,78 @@ function unescapeHTML(str) {
         .replace(/&amp;/gi, '&');
 }
 
+// NUEVO: Importación por Copiado Rápido (Texto Plano)
+app.post('/upload-text', authenticate, async (req, res) => {
+    try {
+        const { text, unidadDefault, profesionalDefault } = req.body;
+        if (!text) return res.status(400).send('No se recibió texto.');
+
+        console.log('--- 📡 Procesando Copiado Rápido de Texto ---');
+        const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 5);
+        const data = [];
+        const now = new Date();
+        const diaSemana = getSpanishDay(now);
+        const fechaDisplay = now.toLocaleDateString('es-CL');
+
+        lines.forEach((line, idx) => {
+            try {
+                // 1. Extraer Teléfono (Chilean Format)
+                const phoneMatch = line.match(/(56)?9\d{8}/);
+                if (!phoneMatch) return;
+                const phone = phoneMatch[0];
+
+                // 2. Extraer Hora (Formato HH:MM)
+                const timeMatch = line.match(/\d{1,2}:\d{2}/);
+                const hora = timeMatch ? timeMatch[0] : 'Por definir';
+
+                // 3. Extraer Nombre (Lógica Inteligente)
+                let nombre = 'Paciente';
+                if (line.includes('|')) {
+                    // Formato Tabla: 1... | NOMBRE | MOTIVO | TEL
+                    const parts = line.split('|').map(p => p.trim());
+                    if (parts.length > 1) {
+                        // Limpiar nombres con puntos suspensivos o códigos
+                        nombre = parts[1].replace(/\.{2,}/g, '').replace(/[\d\.]+/g, '').trim();
+                        // Si el nombre quedó vacío o muy corto, intentar con otra parte
+                        if (nombre.length < 3 && parts[2]) nombre = parts[2].trim();
+                    }
+                } else {
+                    // Formato Libre: Quitar el teléfono y usar lo restante
+                    nombre = line.replace(phone, '').replace(hora, '').replace(/[:|\-]/g, '').trim();
+                    // Limpieza básica
+                    nombre = nombre.replace(/\d+\s+/g, '').replace(/\s+/g, ' '); 
+                }
+
+                // 4. Extraer Motivo (Si hay pipes)
+                let motivo = 'Consulta Médica';
+                if (line.includes('|')) {
+                    const parts = line.split('|').map(p => p.trim());
+                    if (parts.length > 2) motivo = parts[2].replace(/\.{2,}/g, '').trim();
+                }
+
+                data.push({
+                    Nombre: nombre || 'Paciente',
+                    Celular: phone, // El bucle de envío ya normaliza 569
+                    FechaDisplay: fechaDisplay,
+                    HoraCita: hora,
+                    DiaSemana: diaSemana,
+                    Motivo: motivo,
+                    Unidad: unidadDefault || 'Atención Médica',
+                    Profesional: profesionalDefault || 'Médico'
+                });
+            } catch (err) {
+                console.error(`Error procesando línea ${idx}:`, err.message);
+            }
+        });
+
+        console.log(`🏁 Extracción rápida finalizada: ${data.length} pacientes capturados.`);
+        res.json(data);
+    } catch (error) {
+        console.error('Error en /upload-text:', error);
+        res.status(500).send(`Error al procesar texto: ${error.message}`);
+    }
+});
+
 app.post('/upload', upload.single('file'), async (req, res) => {
     if (!req.file) {
         return res.status(400).send('No file uploaded.');
