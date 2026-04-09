@@ -240,7 +240,8 @@ function initializeWhatsApp() {
                 '--disable-gpu',
                 '--disable-software-rasterizer',
                 '--disable-extensions',
-                '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+                '--disable-blink-features=AutomationControlled',
+                '--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
             ]
         }
     });
@@ -1289,7 +1290,38 @@ app.post('/whatsapp/reset', authenticate, async (req, res) => {
     }
 });
 
-// Ruta de reserva para SPA (Catch-all) - Maneja cualquier ruta no definida arriba
+// Endpoint para REINICIO TOTAL (Borrar carpeta de sesión)
+// Útil cuando WhatsApp dice "No se pudo vincular el dispositivo"
+app.post('/whatsapp/hard-reset', authenticate, async (req, res) => {
+    try {
+        console.log("💣 INICIANDO HARD RESET de WhatsApp...");
+        
+        if (client) {
+            try { await client.destroy(); } catch (e) {}
+        }
+
+        const authPath = path.resolve(__dirname, '.wwebjs_auth');
+        if (fs.existsSync(authPath)) {
+            fs.rmSync(authPath, { recursive: true, force: true });
+            console.log("✅ Carpeta de sesión .wwebjs_auth eliminada.");
+        }
+
+        const cachePath = path.resolve(__dirname, '.wwebjs_cache');
+        if (fs.existsSync(cachePath)) {
+            fs.rmSync(cachePath, { recursive: true, force: true });
+        }
+
+        res.json({ message: 'Sesión borrada. El servidor se reiniciará para generar un QR limpio.' });
+        
+        // Forzar reinicio del proceso para que Railway lo levante limpio
+        setTimeout(() => process.exit(0), 1000);
+    } catch (error) {
+        console.error('Error en Hard Reset:', error);
+        res.status(500).send('Error en el borrado físico de la sesión.');
+    }
+});
+
+// Ruta de reserva para SPA (Catch-all) ...
 // Esta sintaxis es 100% compatible con Express 5 y no requiere regex
 app.use((req, res, next) => {
     // Si llegamos aquí y no es una ruta de API o Socket.io, servimos el index.html

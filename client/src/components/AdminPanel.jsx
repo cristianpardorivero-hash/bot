@@ -97,6 +97,29 @@ const AdminPanel = () => {
     setLoading(false);
   };
 
+  const handleHardResetWhatsApp = async () => {
+    if (!window.confirm("🚨 ALERTA DE LIMPIEZA PROFUNDA: Esta acción borrará FÍSICAMENTE los archivos de sesión del servidor. Úsala SOLO si recibes el error 'No se pudo vincular el dispositivo'. El servidor se reiniciará automáticamente. ¿Proceder?")) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { auth } = await import("../firebase");
+      const token = await auth.currentUser.getIdToken();
+      
+      const response = await axios.post(`${API_URL}/whatsapp/hard-reset`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      alert(`✅ ${response.data.message}`);
+      window.location.reload(); // Recargar para esperar el reinicio del servidor
+    } catch (err) {
+      console.error("Error en limpieza profunda:", err);
+      alert("❌ Error: No se pudo realizar la limpieza profunda.");
+    }
+    setLoading(false);
+  };
+
   if (userProfile?.role !== "ADMIN") {
     return <div className="p-8 text-center">Acceso Denegado. Solo administradores.</div>;
   }
@@ -275,10 +298,20 @@ const AdminPanel = () => {
             type="button" 
             disabled={loading} 
             onClick={handleResetWhatsApp}
-            className="w-full flex items-center justify-center gap-2 bg-red-600 text-white font-bold py-3.5 rounded-xl shadow-md hover:bg-red-700 transition-all active:scale-[0.98] disabled:bg-red-300 text-sm"
+            className="w-full flex items-center justify-center gap-2 bg-slate-100 text-slate-700 font-bold py-3.5 rounded-xl hover:bg-slate-200 transition-all active:scale-[0.98] disabled:bg-slate-50 text-sm mb-3"
           >
             {loading ? <RefreshCw className="animate-spin" size={18} /> : <RefreshCw size={18} />}
-            {loading ? "Reiniciando..." : "Cerrar Sesión de WhatsApp y Forzar Nuevo QR"}
+            {loading ? "Reiniciando..." : "Reiniciar Motor de WhatsApp"}
+          </button>
+
+          <button 
+            type="button" 
+            disabled={loading} 
+            onClick={handleHardResetWhatsApp}
+            className="w-full flex items-center justify-center gap-2 bg-red-600 text-white font-bold py-3.5 rounded-xl shadow-md hover:bg-red-700 transition-all active:scale-[0.98] disabled:bg-red-300 text-sm"
+          >
+            {loading ? <RefreshCw className="animate-spin" size={18} /> : <Trash2 size={18} />}
+            {loading ? "Borrando..." : "Limpieza Profunda (Wipe Session)"}
           </button>
         </div>
       </div>
