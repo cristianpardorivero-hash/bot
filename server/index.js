@@ -714,11 +714,10 @@ app.post('/upload-text', authenticate, async (req, res) => {
         const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 5);
         const data = [];
         const now = new Date();
-        const diaSemana = getSpanishDay(now);
-        const fechaDisplay = now.toLocaleDateString('es-CL');
         
         let currentUnidad = unidadDefault || 'Atención Médica';
         let currentProfesional = profesionalDefault || 'Médico';
+        let currentFecha = now.toLocaleDateString('es-CL');
 
         lines.forEach((line, idx) => {
             try {
@@ -735,15 +734,35 @@ app.post('/upload-text', authenticate, async (req, res) => {
                     if (raw) currentProfesional = raw.replace(/^\d+\s+/, '').trim();
                     return;
                 }
+                if (lineUpper.includes('FECHA ATENCIÓN') || lineUpper.includes('FECHA ATENCION')) {
+                    let dateMatch = line.match(/\d{1,2}\/\d{1,2}\/\d{2,4}/);
+                    if (dateMatch) currentFecha = dateMatch[0];
+                    return;
+                }
 
                 // 2. Extraer Teléfono (Chilean Format)
                 const phoneMatch = line.match(/(56)?9\d{8}/);
                 if (!phoneMatch) return;
                 const phone = phoneMatch[0];
 
-                // 3. Extraer Hora (Formato HH:MM)
+                // 3. Extraer Fecha/Hora de la línea (Prioridad absoluta sobre cabecera)
+                const dateMatch = line.match(/\d{1,2}\/\d{1,2}\/\d{2,4}/);
+                if (dateMatch) currentFecha = dateMatch[0];
+                
                 const timeMatch = line.match(/\d{1,2}:\d{2}/);
                 const hora = timeMatch ? timeMatch[0] : 'Por definir';
+
+                // Cálculo de Día de la Semana basado en la fecha detectada
+                let diaSemanaLocal = 'cita';
+                try {
+                    const [d, m, y] = currentFecha.split('/');
+                    const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+                    if (!isNaN(dateObj.getTime())) {
+                        diaSemanaLocal = getSpanishDay(dateObj);
+                    }
+                } catch (e) {
+                    diaSemanaLocal = getSpanishDay(now);
+                }
 
                 // 3. Extractor y Limpiador Inteligente de Nombres
                 const cleanMedicalText = (raw) => {
@@ -781,20 +800,18 @@ app.post('/upload-text', authenticate, async (req, res) => {
                 if (parts.length > 3) {
                     // Si detectamos columnas claras (formato tabla)
                     nombre = cleanMedicalText(parts[2] || parts[1]);
-                    // Ya no sobre-escribimos el motivo con lo que hay en la fila,
-                    // pues el usuario quiere que el motivo sea la Unidad de Atención.
                 } else {
                     // Formato Libre: Quitar el teléfono y la hora
-                    let raw = line.replace(phone, '').replace(hora, '');
+                    let raw = line.replace(phone, '').replace(hora, '').replace(currentFecha, '');
                     nombre = cleanMedicalText(raw);
                 }
 
                 data.push({
                     Nombre: nombre || 'Paciente',
                     Celular: phone,
-                    FechaDisplay: fechaDisplay,
+                    FechaDisplay: currentFecha,
                     HoraCita: hora,
-                    DiaSemana: diaSemana,
+                    DiaSemana: diaSemanaLocal,
                     Motivo: motivo,
                     Unidad: currentUnidad,
                     Profesional: currentProfesional
