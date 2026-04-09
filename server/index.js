@@ -1126,11 +1126,6 @@ app.post('/send-messages', authenticate, async (req, res) => {
             });
 
             try {
-                const state = await client.getState().catch(() => 'UNKNOWN');
-                if (state !== 'CONNECTED') {
-                    io.emit('log', `⚠️ Estado de WhatsApp: ${state}. Intentando enviar de todos modos...`);
-                }
-
                 // 5. ENVÍO REAL (Con Timeout de Seguridad para no Colgarse)
                 io.emit('log', `📤 Enviando a ${phone}...`);
                 io.emit('log', `⏳ Iniciando transmisión real (WhatsApp Web)...`);
