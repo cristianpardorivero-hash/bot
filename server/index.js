@@ -107,7 +107,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // Habilitar pre-flight para todas las rutas
+// app.options('*', cors(corsOptions)); // Línea eliminada para evitar crash en Express 5
 
 app.use(express.json());
 
@@ -1290,14 +1290,17 @@ app.post('/whatsapp/reset', authenticate, async (req, res) => {
 });
 
 // Ruta comodín para SPA (Catch-all) - DEBE IR AL FINAL DE LAS RUTAS
-app.get('*', (req, res) => {
+// Nota: Express 5 requiere (.*) para capturar todo
+app.get('(.*)', (req, res) => {
     res.sendFile(path.join(__dirname, '../client/dist/index.html'));
 });
 
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`🚀 SERVIDOR ACTIVO en puerto ${PORT}`);
+    console.log(`🌐 Orígenes permitidos: ${ALLOWED_ORIGINS.join(', ')}`);
+    console.log(`🕒 Hora inicio: ${new Date().toISOString()}`);
 });
 
 process.on('SIGINT', async () => {
