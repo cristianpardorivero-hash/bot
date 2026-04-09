@@ -110,7 +110,8 @@ const corsOptions = {
 app.use(cors(corsOptions));
 // app.options('*', cors(corsOptions)); // Línea eliminada para evitar crash en Express 5
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 const server = http.createServer(app);
 
@@ -750,15 +751,17 @@ app.post('/upload-text', authenticate, async (req, res) => {
                     let clean = raw;
                     // Eliminar fechas (09/04, 12/12/2024)
                     clean = clean.replace(/\d{1,2}\/\d{1,2}(\/\d{2,4})?/g, '');
-                    // Eliminar RUTs (12.371.091-6, etc)
+                    // Eliminar RUTs (12.371.091-6, etc) y limpiar guiones bajos residuales
                     clean = clean.replace(/\d{1,2}(?:\.\d{3}){0,2}-?[\dkK]/g, '');
-                    // Eliminar letras sueltas rodeadas de espacios (M, F, N, S, C) que son metadatos de columnas
+                    clean = clean.replace(/_{2,}/g, ' '); 
+                    
+                    // Eliminar letras sueltas rodeadas de espacios (M, F, N, S, C) 
                     clean = clean.replace(/\s[MFNSC]\s/g, ' ').replace(/^[MFNSC]\s/g, ' ').replace(/\s[MFNSC]$/g, ' ');
                     // Eliminar basura visual y códigos
                     clean = clean.replace(/[_/\\|=-]{1,}/g, ' ');
                     clean = clean.replace(/\.{2,}/g, ' ');
-                    // Eliminar palabras de ruido administrativo
-                    const noise = ['FONASA', 'FONASAB', 'FONASAA', 'ISAPRE', 'FONASAC', 'INTERCONSULTA', 'CITADO', 'CONTROL', 'PREVENCION', 'NORMAL', 'SUBESCUPO'];
+                    // Eliminar palabras de ruido administrativo masivamente
+                    const noise = ['FONASA', 'FONASAB', 'FONASAA', 'ISAPRE', 'FONASAC', 'INTERCONSULTA', 'CITADO', 'CONTROL', 'PREVENCION', 'NORMAL', 'SUBESCUPO', 'TIPO HORA', 'SOBRECUPO', 'APS', 'DIAGNO', 'PRESTA', 'CELULAR', 'HORA ATEN', 'FICHA', 'PROGRAMA', 'MUJER'];
                     noise.forEach(word => {
                         const reg = new RegExp(`\\b${word}\\b`, 'gi');
                         clean = clean.replace(reg, '');

@@ -165,7 +165,14 @@ const AppContent = () => {
       setImportMode('excel'); // Volver a la vista de tabla para previsualizar
     } catch (error) {
       console.error('Error importing text:', error);
-      alert('Error al procesar el texto. Asegúrate de que el formato sea similar al ejemplo.');
+      const isLarge = error.response?.status === 413;
+      const errorMsg = error.response?.data || error.message;
+      
+      if (isLarge) {
+        alert('🚨 El texto es demasiado grande para ser procesado. Intenta dividirlo en partes más pequeñas (ej: por unidad de atención).');
+      } else {
+        alert(`❌ Error al procesar: ${errorMsg}\nAsegúrate de que el formato sea similar al ejemplo o que la lista tenga teléfonos válidos.`);
+      }
     } finally {
       setIsImportingText(false);
     }
