@@ -767,7 +767,7 @@ app.post('/upload-text', authenticate, async (req, res) => {
                 };
 
                 let nombre = 'Paciente';
-                let motivo = currentUnidad; // Fallback al contexto de la unidad
+                let motivo = currentUnidad; // PRIORIDAD: Usar siempre la Unidad de la cabecera como motivo
 
                 // DETECTOR DE SEPARADOR (Tab, Pipe o múltiples espacios)
                 let parts = [];
@@ -778,20 +778,12 @@ app.post('/upload-text', authenticate, async (req, res) => {
                 if (parts.length > 3) {
                     // Si detectamos columnas claras (formato tabla)
                     nombre = cleanMedicalText(parts[2] || parts[1]);
-                    // Buscar motivo específico en la fila
-                    for(let p of parts) {
-                        const s = p.toUpperCase();
-                        if (s.includes('INTERCONSU')) { motivo = 'Interconsulta'; break; }
-                        if (s.includes('CONSULTA')) { motivo = 'Consulta'; break; }
-                        if (s.includes('CONTROL')) { motivo = 'Control'; break; }
-                        if (s.includes('PSICOTERAPIA')) { motivo = 'Psicoterapia'; break; }
-                    }
+                    // Ya no sobre-escribimos el motivo con lo que hay en la fila,
+                    // pues el usuario quiere que el motivo sea la Unidad de Atención.
                 } else {
                     // Formato Libre: Quitar el teléfono y la hora
                     let raw = line.replace(phone, '').replace(hora, '');
                     nombre = cleanMedicalText(raw);
-                    if (lineUpper.includes('INTERCONSU')) motivo = 'Interconsulta';
-                    else if (lineUpper.includes('CONTROL')) motivo = 'Control';
                 }
 
                 data.push({
