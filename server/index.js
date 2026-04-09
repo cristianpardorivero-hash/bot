@@ -7,6 +7,7 @@ const xlsx = require('xlsx');
 const multer = require('multer');
 const cors = require('cors');
 const path = require('path');
+const { exec } = require('child_process');
 const fs = require('fs');
 
 const admin = require('firebase-admin');
@@ -1273,8 +1274,17 @@ app.post('/admin/update-user', authenticate, async (req, res) => {
     }
 });
 
-// Función robusta para eliminar la carpeta de sesión en Windows (maneja bloqueos de archivos)
-async function deleteAuthFolder(folderPath, retries = 5, delay = 1000) {
+// Función robusta para eliminar la carpeta de sesión en Linux/Windows
+async function deleteAuthFolder(folderPath, retries = 5, delay = 1500) {
+    // 0. Intentar matar procesos de Chrome que puedan estar bloqueando la carpeta
+    if (process.platform === 'linux') {
+        try {
+            console.log("🧹 Intentando cerrar procesos de Chrome (pkill)...");
+            await new Promise(resolve => exec('pkill -f chrome', resolve));
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch(e) { console.log("Info: No había procesos de chrome activos."); }
+    }
+
     for (let i = 0; i < retries; i++) {
         try {
             if (fs.existsSync(folderPath)) {
@@ -1282,13 +1292,13 @@ async function deleteAuthFolder(folderPath, retries = 5, delay = 1000) {
                 console.log(`✅ [Intento ${i+1}] Carpeta de sesión eliminada exitosamente.`);
                 return true;
             }
-            return true; // Ya no existe
+            console.log(`ℹ️ [Intento ${i+1}] La carpeta ya no existe o fue eliminada.`);
+            return true;
         } catch (e) {
             console.warn(`⚠️ [Intento ${i+1}] No se pudo eliminar la carpeta de sesión (${e.message}). Reintentando en ${delay}ms...`);
             await new Promise(resolve => setTimeout(resolve, delay));
         }
     }
-    console.error("❌ Fallaron todos los intentos de eliminar la carpeta de sesión. Es posible que Chromium siga abierto.");
     return false;
 }
 
@@ -1326,7 +1336,7 @@ app.post('/whatsapp/reset', authenticate, async (req, res) => {
         }
 
         // 2. Pequeño respiro para que el SO suelte los archivos
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 3000));
 
         // 3. Borrar carpeta de sesión de forma robusta
         const authPath = path.resolve(__dirname, '.wwebjs_auth');
