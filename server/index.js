@@ -725,11 +725,13 @@ app.post('/upload-text', authenticate, async (req, res) => {
                 
                 // 1. DETECTOR DE CABECERAS (Contexto persistente)
                 if (lineUpper.includes('UNIDAD ATENCIÓN') || lineUpper.includes('UNIDAD ATENCION')) {
-                    currentUnidad = line.split(/unidad atenci[óo]n/gi)[1]?.replace(/^[:\s-]+/, '').trim() || currentUnidad;
+                    let raw = line.split(/unidad atenci[óo]n/gi)[1]?.replace(/^[:\s-]+/, '').trim();
+                    if (raw) currentUnidad = raw.replace(/^\d+\s+/, '').trim();
                     return;
                 }
                 if (lineUpper.includes('RECURSO')) {
-                    currentProfesional = line.split(/recurso/gi)[1]?.replace(/^[:\s-]+/, '').trim() || currentProfesional;
+                    let raw = line.split(/recurso/gi)[1]?.replace(/^[:\s-]+/, '').trim();
+                    if (raw) currentProfesional = raw.replace(/^\d+\s+/, '').trim();
                     return;
                 }
 
