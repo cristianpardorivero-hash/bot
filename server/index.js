@@ -1090,11 +1090,11 @@ app.post('/send-messages', authenticate, async (req, res) => {
                 try {
                     const numberIdPromise = client.getNumberId(phone);
                     const timeoutPromise = new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 3000) 
+                        setTimeout(() => reject(new Error('TIMEOUT_BROWSER')), 8000) 
                     );
                     numberId = await Promise.race([numberIdPromise, timeoutPromise]);
                 } catch (e) {
-                    io.emit('log', `⏳ Verificación lenta o error de ID para ${phone}.`);
+                    io.emit('log', `⏳ Verificación lenta para ${phone}. Intentando modo persistente...`);
                 }
                 
                 // FALLBACK: Si no hay ID oficial (LID), intentamos el formato tradicional @c.us
@@ -1146,71 +1146,72 @@ app.post('/send-messages', authenticate, async (req, res) => {
             });
 
             try {
-                // 5. ENVÍO REAL (Con Timeout de Seguridad para no Colgarse)
+                // 5. ENVÍO REAL (Con Timeout de Seguridad Ampliado)
                 io.emit('log', `📤 Enviando a ${phone}...`);
                 io.emit('log', `⏳ Iniciando transmisión real (WhatsApp Web)...`);
                 
                 const sendPromise = client.sendMessage(phone, message);
                 const sendTimeout = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('TIMEOUT_SEND')), 20000) 
+                    setTimeout(() => reject(new Error('TIMEOUT_SEND')), 45000) 
                 );
 
                 try {
                     const result = await Promise.race([sendPromise, sendTimeout]);
                     io.emit('log', `✅ Mensaje entregado al motor de WhatsApp.`);
-                    io.emit('progress', { index: i, total: data.length, status: 'success' });
+                    
+                    // Solo si llegó aquí, el envío se considera exitoso para el sistema
+                    console.log(`✅ Mensaje enviado a: ${phone}`);
+                    io.emit('log', `✅ Mensaje enviado exitosamente a ${phone}`);
+                    
+                    const getValue = (keys) => {
+                        const foundKey = Object.keys(row).find(k => 
+                            keys.some(search => k.trim().toLowerCase().includes(search.toLowerCase()))
+                        );
+                        return foundKey ? row[foundKey] : '';
+                    };
+
+                    const sessionKey = String(row[actualPhoneColumn]).replace(/\D/g, ''); 
+                    const sessionData = {
+                        nombre: getValue(['nombre', 'paciente']) || 'Paciente',
+                        telefonoOriginal: row[actualPhoneColumn] || phone,
+                        whatsapp_id: phone,
+                        motivo: getValue(['motivo', 'prestación', 'prestacion', 'agenda']) || 'Sin motivo',
+                        fecha: getValue(['fecha', 'día', 'dia']) || '',
+                        hora: getValue(['hora']) || '',
+                        profesional: getValue(['profesional', 'médico', 'medico', 'especialista']) || 'No asignado',
+                        originalMessage: message,
+                        status: 'Enviado'
+                    };
+
+                    await saveSession(sessionKey, sessionData);
+
+                    io.emit('progress', {
+                        index: i,
+                        total: data.length,
+                        status: 'success',
+                        phone: sessionKey
+                    });
+                    io.emit('status_update', { id: sessionKey, status: 'Enviado', data: sessions[sessionKey] });
+
+                    // Registro histórico en Firestore
+                    logMessageToFirestore({
+                        paciente: sessions[sessionKey].nombre,
+                        telefono: sessionKey,
+                        mensaje: message,
+                        responsable: responsableEmail,
+                        tipo: 'masivo'
+                    });
+
                 } catch (sendErr) {
                     console.error(`❌ Error enviando a ${phone}:`, sendErr.message);
-                    io.emit('log', `❌ Error enviando a ${phone}: ${sendErr.message}`);
-                    io.emit('progress', { index: i, total: data.length, status: 'failed', error: sendErr.message });
+                    const friendlyError = sendErr.message === 'TIMEOUT_SEND' ? 'Tiempo de espera agotado (Servidor lento)' : sendErr.message;
+                    io.emit('log', `❌ Error enviando a ${phone}: ${friendlyError}`);
+                    io.emit('progress', { index: i, total: data.length, status: 'failed', error: friendlyError });
                     
                     if (sendErr.message === 'TIMEOUT_SEND') {
                         consecutiveTimeouts++;
                     }
                 }
-                
-                console.log(`✅ Mensaje enviado a: ${phone}`);
-                io.emit('log', `✅ Mensaje enviado exitosamente a ${phone}`);
-                io.emit('progress', { index: i, total: data.length, status: 'sent' });
-
-                const getValue = (keys) => {
-                    const foundKey = Object.keys(row).find(k => 
-                        keys.some(search => k.trim().toLowerCase().includes(search.toLowerCase()))
-                    );
-                    return foundKey ? row[foundKey] : '';
-                };
-
-                const sessionKey = String(row[actualPhoneColumn]).replace(/\D/g, ''); 
-                const sessionData = {
-                    nombre: getValue(['nombre', 'paciente']) || 'Paciente',
-                    telefonoOriginal: row[actualPhoneColumn] || phone,
-                    whatsapp_id: phone,
-                    motivo: getValue(['motivo', 'prestación', 'prestacion', 'agenda']) || 'Sin motivo',
-                    fecha: getValue(['fecha', 'día', 'dia']) || '',
-                    hora: getValue(['hora']) || '',
-                    profesional: getValue(['profesional', 'médico', 'medico', 'especialista']) || 'No asignado',
-                    originalMessage: message,
-                    status: 'Enviado'
-                };
-
-                await saveSession(sessionKey, sessionData);
-
-                io.emit('progress', {
-                    index: i,
-                    total: data.length,
-                    status: 'success',
-                    phone: sessionKey
-                });
-                io.emit('status_update', { id: sessionKey, status: 'Enviado', data: sessions[sessionKey] });
-
-                // Registro histórico en Firestore
-                logMessageToFirestore({
-                    paciente: sessions[sessionKey].nombre,
-                    telefono: sessionKey,
-                    mensaje: message,
-                    responsable: responsableEmail,
-                    tipo: 'masivo'
-                });
 
             } catch (error) {
                 const errMsg = error.message || 'Error desconocido';
