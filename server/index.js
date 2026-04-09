@@ -458,7 +458,7 @@ function initializeWhatsApp() {
     });
 }
 
-initializeWhatsApp();
+// initializeWhatsApp(); 
 
 io.on('connection', (socket) => {
     console.log(`🔌 Usuario conectado: ${socket.id}`);
@@ -1289,18 +1289,27 @@ app.post('/whatsapp/reset', authenticate, async (req, res) => {
     }
 });
 
-// Ruta comodín para SPA (Catch-all) - DEBE IR AL FINAL DE LAS RUTAS
-// Nota: Express 5 requiere (.*) para capturar todo
-app.get('(.*)', (req, res) => {
-    res.sendFile(path.join(__dirname, '../client/dist/index.html'));
+// Ruta de reserva para SPA (Catch-all) - Maneja cualquier ruta no definida arriba
+// Esta sintaxis es 100% compatible con Express 5 y no requiere regex
+app.use((req, res, next) => {
+    // Si llegamos aquí y no es una ruta de API o Socket.io, servimos el index.html
+    if (req.method === 'GET' && !req.path.startsWith('/socket.io') && !req.path.startsWith('/whatsapp')) {
+        res.sendFile(path.join(__dirname, '../client/dist/index.html'));
+    } else {
+        next();
+    }
 });
 
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 8080;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 SERVIDOR ACTIVO en puerto ${PORT}`);
     console.log(`🌐 Orígenes permitidos: ${ALLOWED_ORIGINS.join(', ')}`);
     console.log(`🕒 Hora inicio: ${new Date().toISOString()}`);
+    
+    // Iniciar WhatsApp DESPUÉS de que el servidor esté escuchando
+    console.log('--- Iniciando servicios secundarios (WhatsApp)... ---');
+    initializeWhatsApp();
 });
 
 process.on('SIGINT', async () => {
